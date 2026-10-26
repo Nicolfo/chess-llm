@@ -343,7 +343,7 @@ REST API:
 | GET | `/api/games/:id` | |
 | POST | `/api/games/:id/move` | `{from, to, promotion?}` |
 | POST | `/api/games/:id/llm-move` | |
-| POST | `/api/games/:id/pause` | `{paused: true | false}` (LLM vs LLM only) |
+| POST | `/api/games/:id/pause` | `{paused: true}` or `{paused: false}` (LLM vs LLM only) |
 | POST | `/api/games/:id/resign` | |
 
 Games are saved as one JSON file per game (`src/store.js`, written atomically after every move) and loaded on demand, so a restart loses nothing; a move that was being thought about when the server stopped is simply asked again. LLM calls use their own undici agent so Node's built-in 300 s fetch limit doesn't cut off long reasoning.
