@@ -54,6 +54,7 @@ export class Game {
     this.thinking = false;
     this.llmTurns = []; // [{ ply, color, llm, attempts: [{ answer, move, error }], move, reason, resigned, error }]
     this.lastError = null; // last provider/network error, cleared on next attempt
+    this.paused = false; // LLM vs LLM: the viewer paused the game (kept across reloads and restarts)
     this.touchedAt = Date.now();
   }
 
@@ -85,6 +86,13 @@ export class Game {
       throw new GameError(`Illegal move: ${from}-${to}${promotion ? `=${promotion}` : ''}`);
     }
     this.checkGameOver();
+  }
+
+  /** Pause or resume an LLM vs LLM game. A move already being thought about still completes. */
+  setPaused(paused) {
+    this.touch();
+    if (this.mode !== 'watch') throw new GameError('Only LLM vs LLM games can be paused');
+    this.paused = !!paused;
   }
 
   resign() {
@@ -320,6 +328,7 @@ export class Game {
       result: this.result,
       llmTurns: this.llmTurns,
       lastError: this.lastError,
+      paused: this.paused,
     };
   }
 
@@ -335,6 +344,7 @@ export class Game {
     game.result = data.result;
     game.llmTurns = data.llmTurns ?? [];
     game.lastError = data.lastError;
+    game.paused = !!data.paused;
 
     // A turn that was in progress when the server stopped: offer a retry instead of waiting forever.
     const turn = game.llmTurns.at(-1);
@@ -378,6 +388,7 @@ export class Game {
       pgn: c.pgn(),
       thinking: this.thinking,
       lastError: this.lastError,
+      paused: this.paused,
       llmTurns: this.llmTurns,
       result: this.result,
     };

@@ -7,7 +7,7 @@ A chess.com-style web app where you play chess against large language models, or
 *A real game: Claude Opus 5.5 (White) vs Gemini 3.8 Flash (Black), paused after move 12. Each move shows the model's reason and Stockfish's verdict; the eval bar, best line and accuracy are on the side.*
 
 - **Play vs LLM**: pick an opponent and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
-- **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time; while paused, ⏭ Step (or the → key) plays one move at a time.
+- **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time (a paused game stays paused when you reopen it); while paused, ⏭ Step (or the → key) plays one move at a time.
 - **Engine analysis** (📈 Engine): a Stockfish eval bar, the engine's best line, and every move labelled Best / Excellent / Good / Inaccuracy / Mistake / Blunder with an accuracy score per side, like chess.com's game review. Live in LLM vs LLM; against an LLM it appears once the game is over. Stockfish runs in your browser, so it costs nothing and needs no setup.
 
 <p align="center">
@@ -343,6 +343,7 @@ REST API:
 | GET | `/api/games/:id` | |
 | POST | `/api/games/:id/move` | `{from, to, promotion?}` |
 | POST | `/api/games/:id/llm-move` | |
+| POST | `/api/games/:id/pause` | `{paused: true | false}` (LLM vs LLM only) |
 | POST | `/api/games/:id/resign` | |
 
 Games are saved as one JSON file per game (`src/store.js`, written atomically after every move) and loaded on demand, so a restart loses nothing; a move that was being thought about when the server stopped is simply asked again. LLM calls use their own undici agent so Node's built-in 300 s fetch limit doesn't cut off long reasoning.

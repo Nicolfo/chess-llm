@@ -29,7 +29,8 @@ const state = {
   llmBusy: null, // id of the game whose LLM request is in flight
   pollTimer: null,
   advanceTimer: null,
-  paused: false, // LLM vs LLM only
+  paused: false, // LLM vs LLM only; saved with the game on the server
+  pauseRequests: 0, // pause/resume calls in flight: until they finish, the local value wins
   resultShownFor: null,
   logOpen: new Set(), // open <details> in the LLM log, survives re-renders
   logSignature: '',
@@ -184,7 +185,7 @@ function resetGameState(game) {
   state.game = game;
   state.llmBusy = null;
   state.selected = null;
-  state.paused = false;
+  state.paused = !!game.paused;
   state.orientation = game.playerColor ?? 'w';
   state.animatedKey = null;
   state.resultShownFor = null;
@@ -339,6 +340,7 @@ function sync(game) {
   if (state.game?.id !== game.id) return; // stale response from a game we left
   const prevKey = state.animatedKey;
   state.game = game;
+  if (!state.pauseRequests) state.paused = !!game.paused; // e.g. paused from another tab
   renderGame();
 
   const key = moveKey(game);
@@ -1064,11 +1066,23 @@ $('#reasons-btn').addEventListener('click', () => {
   renderGame();
 });
 
-$('#pause-btn').addEventListener('click', () => {
+$('#pause-btn').addEventListener('click', async () => {
+  const game = state.game;
   state.paused = !state.paused;
   if (state.paused) clearTimeout(state.advanceTimer); // a move already being thought about still completes
   renderGame();
   if (!state.paused) maybeAdvance();
+
+  // Save it with the game, so reopening the page later shows it paused.
+  state.pauseRequests++;
+  try {
+    const saved = await api('POST', `/api/games/${game.id}/pause`, { paused: state.paused });
+    if (state.game?.id === game.id) state.game.paused = saved.paused;
+  } catch (err) {
+    toast(`Could not save the pause: ${err.message}`);
+  } finally {
+    state.pauseRequests--;
+  }
 });
 
 // While paused, play exactly one move; maybeAdvance() stops again afterwards because still paused.

@@ -99,6 +99,14 @@ app.post('/api/games/:id/llm-move', async (req, res) => {
   res.json(game);
 });
 
+// { paused: true | false }  LLM vs LLM only
+app.post('/api/games/:id/pause', (req, res) => {
+  const game = getGame(req.params.id);
+  game.setPaused(req.body?.paused);
+  store.save(game);
+  res.json(game);
+});
+
 app.post('/api/games/:id/resign', (req, res) => {
   const game = getGame(req.params.id);
   game.resign();
