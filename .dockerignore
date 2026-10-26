@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.example
+config.json
+helm
+docs
+.git
+.gitignore
+.idea
+*.iml
+Dockerfile
+.dockerignore
+README.md
+LICENSE

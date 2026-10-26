@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "chess-llm.labels" . | nindent 4 }}
+spec:
+  replicas: 1 # games live in memory, so one replica
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "chess-llm.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "chess-llm.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/app-configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/app-secret.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: app
+          image: "{{ .Values.app.imageName }}:{{ .Values.app.imageTag }}"
+          imagePullPolicy: {{ .Values.app.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.app.port | quote }}
+            - name: CHESS_LLM_CONFIG
+              value: /app/config/config.json
+            {{- range $key, $value := .Values.app.env }}
+            - name: {{ $key }}
+              value: {{ $value | toString | quote }}
+            {{- end }}
+            {{- if .Values.auth.enabled }}
+            - name: APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: {{ .Values.auth.key }}
+            {{- end }}
+          {{- if .Values.secretEnv }}
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-env
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-config

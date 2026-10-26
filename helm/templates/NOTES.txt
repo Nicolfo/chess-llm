@@ -1,0 +1,27 @@
+{{- $host := .Values.ingress.externalName }}
+Chess LLM deployed.
+
+{{- if .Values.ingress.enabled }}
+Access: https://{{ $host }}
+{{- else }}
+Access: kubectl port-forward svc/{{ .Release.Name }} -n {{ .Release.Namespace }} 3000:{{ .Values.app.port }}
+{{- end }}
+
+Check rollout:
+  kubectl rollout status deployment/{{ .Release.Name }} -n {{ .Release.Namespace }}
+  kubectl logs deployment/{{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.auth.enabled }}
+
+Login password comes from secret "{{ .Values.auth.existingSecret }}" (key "{{ .Values.auth.key }}").
+The pod will not start until it exists:
+  kubectl create secret generic {{ .Values.auth.existingSecret }} -n {{ .Release.Namespace }} --from-literal={{ .Values.auth.key }}='<password>'
+To change it: delete and recreate the secret, then
+  kubectl rollout restart deployment/{{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- else }}
+
+WARNING: auth.enabled=false, anyone with the URL can spend your API credits.
+{{- end }}
+{{- if not .Values.secretEnv }}
+
+WARNING: no secretEnv set, LLM calls will fail. Fill helm/values-secret.yaml and upgrade with -f helm/values-secret.yaml.
+{{- end }}

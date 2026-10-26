@@ -70,6 +70,10 @@ async function api(method, url, body) {
     headers: body ? { 'content-type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401) {
+    // password protection is on and the session is missing or expired
+    location.href = `/login?next=${encodeURIComponent(location.pathname + location.hash)}`;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error ?? `HTTP ${res.status}`);
@@ -377,6 +381,8 @@ async function requestLlmMove() {
     state.llmBusy = null;
     stopPolling();
     if (err.status === 409) return startPolling(); // already thinking
+    // a proxy gave up waiting (e.g. Cloudflare's 100 s limit); the server keeps thinking, so follow it by polling
+    if (err.status === 504 || err.status === 524) return startPolling();
     toast(err.message, 5000);
     api('GET', `/api/games/${game.id}`).then(sync, () => {});
   }

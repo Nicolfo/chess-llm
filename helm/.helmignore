@@ -1,0 +1,3 @@
+values-secret.yaml
+*.tmp
+.DS_Store

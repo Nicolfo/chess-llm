@@ -157,6 +157,38 @@ Endpoints used in `config.example.json` (everything except Anthropic goes throug
 
 The "LLM log" panel lists every attempt, including rejected ones and why.
 
+## Password protection
+
+Off by default. Set `APP_PASSWORD` and every page and API call requires logging in first (a 30-day HttpOnly cookie; changing the password logs everyone out). `/logout` ends the session.
+
+| variable | |
+|---|---|
+| `APP_PASSWORD` | enables the login page |
+| `COOKIE_SECURE` | `true` to mark the cookie Secure (set it when served over https) |
+| `TRUST_PROXY` | `true`, a hop count, or proxy addresses: take the client IP from `X-Forwarded-For` (used to rate-limit wrong passwords) |
+
+## Deploy to Kubernetes
+
+A Dockerfile and a Helm chart (`helm/`) are included.
+
+```bash
+# 1. Build and push the image
+docker build -t registry.example.com/chess-llm:1.1.0 .
+docker push registry.example.com/chess-llm:1.1.0
+
+# 2. API keys: copy the example and fill it in (git-ignored)
+cp helm/values-secret.example.yaml helm/values-secret.yaml
+
+# 3. Install (set the image and host in helm/values.yaml or with --set)
+helm upgrade --install chess-llm ./helm -n chess-llm --create-namespace -f helm/values-secret.yaml
+
+# 4. Create the login password; the pod waits for this secret before starting
+kubectl create secret generic chess-llm-auth -n chess-llm --from-literal=password='<password>'
+```
+
+The models list lives under `config` in `helm/values.yaml`. Set `auth.enabled: false` to run without a password.
+Games are kept in memory, so the chart runs a single replica.
+
 ## Troubleshooting
 
 | problem | fix |
@@ -202,6 +234,8 @@ src/game.js             game state, prompts, retry loop, game-over detection
 src/llm.js              Anthropic / OpenAI HTTP clients, traced as generations
 src/instrumentation.js  Langfuse / OpenTelemetry setup (imported first)
 src/config.js           config loading + ${ENV} expansion
+src/auth.js             optional password login (APP_PASSWORD)
+helm/                   Helm chart; Dockerfile at the root
 public/                 front-end (vanilla JS, no build step)
 ```
 

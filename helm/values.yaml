@@ -1,0 +1,104 @@
+app:
+  imageName: registry.nicolfo.it/nicolfo/chess-llm
+  imageTag: 1.1.0
+  imagePullPolicy: IfNotPresent
+  port: 3000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  # Plain environment variables. API keys go in values-secret.yaml (secretEnv).
+  env:
+    TRUST_PROXY: "true"        # behind Traefik + Cloudflare tunnel: take the client IP from X-Forwarded-For
+    COOKIE_SECURE: "true"      # served over https by Cloudflare
+    LANGFUSE_BASE_URL: https://cloud.langfuse.com
+    LANGFUSE_TRACING_ENVIRONMENT: production
+
+# Login password, read from an existing Secret so it never appears in values files.
+#   kubectl create secret generic chess-llm-auth -n chess-llm --from-literal=password='...'
+auth:
+  enabled: true
+  existingSecret: chess-llm-auth
+  key: password
+
+# Rendered to config.json. "${VAR}" placeholders are filled from the environment (secretEnv).
+config:
+  maxAttempts: 5
+  requestTimeoutMs: 600000
+  showLegalMoves: false
+  llms:
+    - id: opus-5.5
+      name: Claude Opus 5.5
+      description: Anthropic's most capable model
+      provider: anthropic
+      baseUrl: https://api.anthropic.com
+      model: claude-opus-5-5
+      apiKey: ${ANTHROPIC_API_KEY}
+    - id: fable-5.1
+      name: Claude Fable 5.1
+      description: Anthropic Fable
+      provider: anthropic
+      baseUrl: https://api.anthropic.com
+      model: claude-fable-5-1
+      apiKey: ${ANTHROPIC_API_KEY}
+    - id: gpt-6-astra
+      name: GPT-6 Astra
+      description: OpenAI's flagship for complex reasoning
+      provider: openai
+      baseUrl: https://api.openai.com/v1
+      model: gpt-6-astra
+      apiKey: ${OPENAI_API_KEY}
+    - id: gpt-6.1-sol
+      name: GPT-6.1 Sol
+      description: OpenAI Sol family
+      provider: openai
+      baseUrl: https://api.openai.com/v1
+      model: gpt-6.1-sol
+      apiKey: ${OPENAI_API_KEY}
+    - id: gemini-4-argon
+      name: Gemini 4 Argon
+      description: Google's most capable Gemini
+      provider: openai
+      baseUrl: https://generativelanguage.googleapis.com/v1beta/openai
+      model: gemini-4-argon
+      apiKey: ${GEMINI_API_KEY}
+    - id: gemini-3.8-flash
+      name: Gemini 3.8 Flash
+      description: Fast Gemini
+      provider: openai
+      baseUrl: https://generativelanguage.googleapis.com/v1beta/openai
+      model: gemini-3.8-flash
+      apiKey: ${GEMINI_API_KEY}
+    - id: kimi-k3
+      name: Kimi K3
+      description: Moonshot AI
+      provider: openai
+      baseUrl: https://api.moonshot.ai/v1
+      model: kimi-k3
+      apiKey: ${MOONSHOT_API_KEY}
+    - id: deepseek-v4-pro
+      name: DeepSeek V4 Pro
+      description: DeepSeek flagship
+      provider: openai
+      baseUrl: https://api.deepseek.com
+      model: deepseek-v4-pro
+      apiKey: ${DEEPSEEK_API_KEY}
+    - id: deepseek-flash
+      name: DeepSeek V4.1 Flash
+      description: Fast DeepSeek
+      provider: openai
+      baseUrl: https://api.deepseek.com
+      model: deepseek-flash
+      apiKey: ${DEEPSEEK_API_KEY}
+
+ingress:
+  enabled: true
+  externalName: chess-llm.nicolfo.it
+  ingressClassName: traefik
+  tls:
+    enabled: false   # TLS terminated by Cloudflare
+    secretName: tls-chess-llm
+  annotations:
+    external-dns.alpha.kubernetes.io/target: 82051912-b874-49e9-955b-7a73552b75bc.cfargotunnel.com

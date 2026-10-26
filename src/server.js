@@ -2,6 +2,7 @@ import { shutdownTracing } from './instrumentation.js'; // first: sets up tracin
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { authMiddleware } from './auth.js';
 import { loadConfig } from './config.js';
 import { Game, GameError } from './game.js';
 import { LlmError } from './llm.js';
@@ -10,9 +11,19 @@ const config = loadConfig();
 const games = new Map();
 const GAME_TTL_MS = 6 * 60 * 60 * 1000;
 
+const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+
 const app = express();
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+// No-op unless APP_PASSWORD is set; must come before the static files and the API.
+app.use(authMiddleware({
+  password: process.env.APP_PASSWORD,
+  publicDir: PUBLIC_DIR,
+  secureCookie: process.env.COOKIE_SECURE === 'true',
+}));
 app.use(express.json());
-app.use(express.static(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public')));
+app.use(express.static(PUBLIC_DIR));
 
 // API keys and base URLs never leave the server.
 app.get('/api/llms', (req, res) => {
@@ -84,6 +95,13 @@ app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
+
+// "true", a hop count ("1") or a list of trusted proxy addresses; unset = don't trust X-Forwarded-*.
+function parseTrustProxy(value) {
+  if (!value || value === 'false') return false;
+  if (value === 'true') return true;
+  return /^d+$/.test(value) ? Number(value) : value;
+}
 
 function findLlm(id) {
   const llm = config.llms.find((l) => l.id === id);

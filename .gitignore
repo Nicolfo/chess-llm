@@ -3,3 +3,7 @@ config.json
 .idea/
 *.iml
 .env
+
+# Helm secrets
+helm/values-secret.yaml
+helm/charts/
