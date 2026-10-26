@@ -1,5 +1,6 @@
 import { shutdownTracing } from './instrumentation.js'; // first: sets up tracing before other modules load
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { authMiddleware } from './auth.js';
@@ -24,6 +25,19 @@ app.use(authMiddleware({
 }));
 app.use(express.json());
 app.use(express.static(PUBLIC_DIR));
+
+// Browser-side analysis: Stockfish (lite single-threaded WASM build) and chess.js for the eval bar.
+const require = createRequire(import.meta.url);
+const STOCKFISH_DIR = path.join(path.dirname(require.resolve('stockfish/package.json')), 'bin');
+const ENGINE_FILES = { 'stockfish.js': 'stockfish-19-lite-single.js', 'stockfish.wasm': 'stockfish-19-lite-single.wasm' };
+app.get('/engine/:file', (req, res, next) => {
+  const file = ENGINE_FILES[req.params.file];
+  if (!file) return next();
+  res.sendFile(path.join(STOCKFISH_DIR, file), { maxAge: '7d' });
+});
+app.get('/vendor/chess.js', (req, res) => {
+  res.sendFile(path.join(path.dirname(require.resolve('chess.js')), '..', 'esm', 'chess.js'), { maxAge: '7d' });
+});
 
 // API keys and base URLs never leave the server.
 app.get('/api/llms', (req, res) => {

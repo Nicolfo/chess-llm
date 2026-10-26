@@ -320,6 +320,8 @@ export class Game {
         to: m.to,
         color: m.color,
         captured: m.captured ?? null,
+        uci: m.lan,
+        fen: m.after, // position after the move, for the in-browser engine
         reason: this.reasons[i] ?? null,
       })),
       lastMove: last ? { from: last.from, to: last.to } : null,

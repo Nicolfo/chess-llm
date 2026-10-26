@@ -2,12 +2,13 @@
 
 A chess.com-style web app where you play chess against large language models, or watch two of them play each other.
 
-![Claude Opus 5.5 vs Gemini 3.8 Flash in LLM vs LLM mode, paused after 10...Be7 of a Sicilian English Attack](docs/screenshot.png)
+![Claude Opus 5.5 vs Gemini 3.8 Flash in LLM vs LLM mode, paused after 12. g5 of a Sicilian English Attack, with the Stockfish eval bar and move labels](docs/screenshot.png)
 
-*A real game: Claude Opus 5.5 (White) vs Gemini 3.8 Flash (Black), paused after move 10. Each move shows the model's reason; the LLM log lists every attempt.*
+*A real game: Claude Opus 5.5 (White) vs Gemini 3.8 Flash (Black), paused after move 12. Each move shows the model's reason and Stockfish's verdict; the eval bar, best line and accuracy are on the side.*
 
 - **Play vs LLM**: pick an opponent and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
 - **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time; while paused, ⏭ Step (or the → key) plays one move at a time.
+- **Engine analysis** (📈 Engine): a Stockfish eval bar, the engine's best line, and every move labelled Best / Excellent / Good / Inaccuracy / Mistake / Blunder with an accuracy score per side, like chess.com's game review. Live in LLM vs LLM; against an LLM it appears once the game is over. Stockfish runs in your browser, so it costs nothing and needs no setup.
 
 <p align="center">
   <img src="docs/llm-vs-llm.png" alt="LLM vs LLM setup: Claude Opus 5.5 selected for White, Gemini 3.8 Flash for Black" width="480">
@@ -324,6 +325,7 @@ src/llm.js              Anthropic / OpenAI HTTP clients, traced as generations
 src/instrumentation.js  Langfuse / OpenTelemetry setup (imported first)
 src/config.js           config loading + ${ENV} expansion
 src/auth.js             optional password login (APP_PASSWORD)
+public/engine.js        Stockfish (WASM) in a Web Worker, eval and move classification
 helm/                   Helm chart; Dockerfile at the root
 public/                 front-end (vanilla JS, no build step)
 ```
@@ -345,6 +347,7 @@ Games live in memory and are dropped after 6 h idle or on restart. LLM calls use
 
 - Model logos: [lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT); trademarks belong to their owners.
 - Piece images: Cburnett set from Wikimedia Commons (CC BY-SA 3.0), via the cm-chessboard sprite.
+- Analysis engine: [Stockfish](https://stockfishchess.org) 19 compiled to WebAssembly by [stockfish.js](https://github.com/nmrugg/stockfish.js) (GPL-3.0). It is served unmodified from the `stockfish` npm package as a separate program; its license is in `node_modules/stockfish/Copying.txt`.
 
 ## License
 

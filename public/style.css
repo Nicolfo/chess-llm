@@ -614,3 +614,88 @@ body {
 
 .avatar.logo { background: #f4f3f0; }
 .avatar.logo img { width: 68%; height: 68%; display: block; }
+
+/* ---------- Engine (Stockfish in the browser) ---------- */
+
+.game.with-eval { --board-size: min(calc(100vh - 230px), calc(100vw - 64px), 720px); }
+.game.with-eval .board-column { width: calc(var(--board-size) + 32px); }
+.board-wrap { display: flex; gap: 8px; }
+
+.eval-bar {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: var(--board-size);
+  display: flex;
+  flex-direction: column-reverse; /* White fills from the bottom */
+  background: #403d39;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.eval-bar.flipped { flex-direction: column; }
+.eval-fill {
+  height: 50%;
+  background: #f0efe9;
+  transition: height 0.5s ease;
+}
+.eval-text {
+  position: absolute;
+  left: 0;
+  right: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1;
+}
+.eval-text.at-bottom { bottom: 5px; }
+.eval-text.at-top { top: 5px; }
+.eval-text.on-white { color: #403d39; }
+.eval-text.on-black { color: #f0efe9; }
+
+.engine-panel {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.engine-head { display: flex; align-items: baseline; gap: 8px; }
+.engine-eval {
+  min-width: 52px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+}
+.engine-eval.white { background: #f0efe9; color: #262421; }
+.engine-eval.black { background: #111; color: #f0efe9; border: 1px solid #555; }
+.engine-line { color: #dcdcd8; line-height: 1.4; }
+.engine-line .muted, .engine-head .muted { color: var(--text-muted); }
+.engine-line .pv-move { font-weight: 600; }
+.engine-summary { display: flex; flex-direction: column; gap: 2px; color: #c3c2c0; }
+.engine-summary b { color: var(--text); }
+.engine-summary .summary-row { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 8px; }
+.engine-summary .counts { white-space: nowrap; }
+
+.mv-class {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  vertical-align: 1px;
+}
+.mv-class.best { background: #81b64c; }
+.mv-class.excellent { background: #96bc4b; }
+.mv-class.good { background: #77915f; }
+.mv-class.inaccuracy { background: #f7c631; color: #262421; }
+.mv-class.mistake { background: #e58f2a; }
+.mv-class.blunder { background: #ca3431; }
+.engine-summary .mv-class { margin: 0 2px 0 6px; }

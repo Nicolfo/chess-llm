@@ -72,6 +72,10 @@
       </div>
 
       <div class="board-wrap">
+        <div id="eval-bar" class="eval-bar" hidden title="Stockfish evaluation">
+          <div class="eval-fill"></div>
+          <span class="eval-text"></span>
+        </div>
         <div id="board" class="board"></div>
         <div id="promotion" class="promotion" hidden></div>
       </div>
@@ -93,6 +97,8 @@
 
       <div id="reason-callout" class="reason-callout" hidden></div>
 
+      <div id="engine-panel" class="engine-panel" hidden></div>
+
       <div class="panel-section moves-section">
         <h2>Moves</h2>
         <ol id="move-list" class="move-list"></ol>
@@ -107,6 +113,7 @@
         <button id="flip-btn" class="btn btn-ghost" title="Flip board">⇅ Flip</button>
         <button id="pgn-btn" class="btn btn-ghost" title="Copy PGN">⧉ PGN</button>
         <button id="sound-btn" class="btn btn-ghost" title="Toggle sound">🔊</button>
+        <button id="engine-btn" class="btn btn-ghost" title="Stockfish evaluation: eval bar, best line and move classification">📈 Engine</button>
         <button id="reasons-btn" class="btn btn-ghost" title="Show the LLM's reason for each move">💬 Reasons</button>
         <button id="pause-btn" class="btn btn-ghost" title="Pause / resume">⏸ Pause</button>
         <button id="step-btn" class="btn btn-ghost" title="Play the next move (→)">⏭ Step</button>

@@ -2,11 +2,15 @@
 // this file renders it, turns clicks / drags into move requests, and
 // asks the server for an LLM move whenever an LLM is to play.
 
+import { CLASSES, Engine, classify, formatEval, moveAccuracy, winChance } from './engine.js';
+
 const FILES = 'abcdefgh';
 const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const COLOR_NAME = { w: 'White', b: 'Black' };
 const POLL_MS = 1000;
 const WATCH_DELAY_MS = 900; // pause between moves in LLM vs LLM so they can be followed
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+const PV_PLIES = 10; // length of the best line shown
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -31,7 +35,12 @@ const state = {
   logSignature: '',
   soundOn: load('sound', true),
   showReasons: load('reasons', false), // vs-human games; always on when watching
+  showEngine: load('engine', true), // eval bar etc.: live when watching, after the game when playing
+  analysisRequested: new Set(), // FENs already sent to the engine for the current game
 };
+
+const engine = new Engine();
+let engineError = null;
 
 // ---------------------------------------------------------------- utils
 
@@ -181,6 +190,8 @@ function resetGameState(game) {
   state.resultShownFor = null;
   state.logOpen.clear();
   state.logSignature = '';
+  engine.clearQueue();
+  state.analysisRequested.clear();
   $('#result-modal').hidden = true;
 }
 
@@ -189,6 +200,8 @@ function resetGameState(game) {
 async function showLobby() {
   stopPolling();
   clearTimeout(state.advanceTimer);
+  engine.clearQueue();
+  state.analysisRequested.clear();
   state.game = null;
   $('#game').hidden = true;
   $('#result-modal').hidden = true;
@@ -470,6 +483,10 @@ function renderGame() {
   renderReasonCallout();
   renderMoves();
   renderLog();
+  renderAnalysis();
+  requestAnalysis();
+  $('#engine-btn').hidden = !engineAllowed(g) || !!engineError;
+  $('#engine-btn').classList.toggle('active', state.showEngine);
   $('#resign-btn').hidden = isWatch(g);
   $('#resign-btn').disabled = !!g.result;
   $('#reasons-btn').hidden = isWatch(g);
@@ -611,6 +628,7 @@ function renderMoves() {
   const list = $('#move-list');
   const last = g.history.length - 1;
   const withReasons = reasonsVisible(g);
+  const tag = (i) => (engineVisible(g) ? classBadge(g, i) : '');
   list.classList.toggle('with-reasons', withReasons);
 
   if (withReasons) {
@@ -618,7 +636,7 @@ function renderMoves() {
     list.innerHTML = g.history
       .map(
         (m, i) => `<li><div class="ply-head"><span class="num">${moveLabel(i)}</span><span class="side-dot ${m.color}"></span>
-          <span class="san${i === last ? ' current' : ''}">${esc(m.san)}</span><span class="who">${esc(label(g, m.color))}</span></div>
+          <span class="san${i === last ? ' current' : ''}">${esc(m.san)}${tag(i)}</span><span class="who">${esc(label(g, m.color))}</span></div>
           ${m.reason ? `<div class="reason">${esc(m.reason)}</div>` : ''}</li>`,
       )
       .join('');
@@ -629,8 +647,8 @@ function renderMoves() {
       const b = g.history[i + 1];
       const cur = (idx) => (idx === last ? ' current' : '');
       rows.push(
-        `<li><span class="num">${i / 2 + 1}.</span><span class="san${cur(i)}">${esc(w.san)}</span>${
-          b ? `<span class="san${cur(i + 1)}">${esc(b.san)}</span>` : '<span></span>'
+        `<li><span class="num">${i / 2 + 1}.</span><span class="san${cur(i)}">${esc(w.san)}${tag(i)}</span>${
+          b ? `<span class="san${cur(i + 1)}">${esc(b.san)}${tag(i + 1)}</span>` : '<span></span>'
         }</li>`,
       );
     }
@@ -702,6 +720,175 @@ $('#llm-log').addEventListener(
 $('#llm-log').addEventListener('click', (e) => {
   if (e.target.id === 'retry-btn') requestLlmMove();
 });
+
+// ---------------------------------------------------------------- engine analysis
+
+// Live in LLM vs LLM; in a game against an LLM only once it's over (no help while playing).
+const engineAllowed = (g) => isWatch(g) || !!g.result;
+const engineVisible = (g) => state.showEngine && engineAllowed(g) && !engineError;
+const positions = (g) => [START_FEN, ...g.history.map((m) => m.fen)];
+
+/** Queue every position of the game that hasn't been analysed yet, the one on screen first. */
+function requestAnalysis() {
+  const g = state.game;
+  if (!engineVisible(g)) return;
+  const fens = positions(g);
+  for (const fen of [...fens].reverse()) {
+    if (state.analysisRequested.has(fen)) continue;
+    state.analysisRequested.add(fen);
+    const gameId = g.id;
+    engine.analyze(fen).then(
+      () => analysisArrived(gameId),
+      (err) => {
+        if (err.message === 'cancelled') return;
+        if (engineError) return;
+        engineError = err;
+        toast('The analysis engine could not start in this browser');
+        if (state.game?.id === gameId) renderGame();
+      },
+    );
+  }
+  engine.prioritize(fens.at(-1));
+}
+
+let analysisFrame = null;
+function analysisArrived(gameId) {
+  if (state.game?.id !== gameId || analysisFrame) return;
+  analysisFrame = requestAnimationFrame(() => {
+    analysisFrame = null;
+    if (state.game?.id !== gameId) return;
+    renderAnalysis();
+    renderMoves();
+  });
+}
+
+/** Evaluation of the position on screen; a drawn game shows 0.0 whatever the engine thinks. */
+function currentEval(g) {
+  if (g.result && !g.result.winner) return { cp: 0, mate: null, pv: [], best: null, depth: 0 };
+  return engine.cache.get(positions(g).at(-1)) ?? null;
+}
+
+function renderAnalysis() {
+  const g = state.game;
+  const visible = engineVisible(g);
+  $('#game').classList.toggle('with-eval', visible);
+  $('#eval-bar').hidden = !visible;
+  $('#engine-panel').hidden = !visible;
+  if (!visible) return;
+
+  const ev = currentEval(g);
+  const bar = $('#eval-bar');
+  bar.classList.toggle('flipped', state.orientation === 'b');
+  if (ev) {
+    const white = winChance(ev, 'w');
+    bar.querySelector('.eval-fill').style.height = `${(white * 100).toFixed(1)}%`;
+    const whiteEnd = state.orientation === 'w' ? 'at-bottom' : 'at-top';
+    const blackEnd = state.orientation === 'w' ? 'at-top' : 'at-bottom';
+    const text = bar.querySelector('.eval-text');
+    text.className = `eval-text ${white >= 0.5 ? `${whiteEnd} on-white` : `${blackEnd} on-black`}`;
+    text.textContent = formatEval(ev).replace(/^[+-]/, '');
+    bar.title = `Stockfish: ${formatEval(ev)}`;
+  } else {
+    // not analysed yet (e.g. a new game): neutral bar instead of the previous position's
+    bar.querySelector('.eval-fill').style.height = '50%';
+    bar.querySelector('.eval-text').textContent = '';
+    bar.title = 'Stockfish is analysing…';
+  }
+  renderEnginePanel(g, ev);
+}
+
+function renderEnginePanel(g, ev) {
+  const el = $('#engine-panel');
+  if (!ev) {
+    el.innerHTML = '<div class="engine-head"><span class="muted">Stockfish is analysing…</span></div>';
+    return;
+  }
+  const side = winChance(ev, 'w') >= 0.5 ? 'white' : 'black';
+  const depth = ev.depth ? `Stockfish 19 · depth ${ev.depth}` : 'Stockfish 19';
+  const line = g.result
+    ? `<span class="muted">${esc(g.result.text)}</span>`
+    : ev.pv.length
+      ? `<span class="muted">Best:</span> ${pvHtml(positions(g).at(-1), ev.pv)}`
+      : '';
+  el.innerHTML = `<div class="engine-head"><span class="engine-eval ${side}">${esc(formatEval(ev))}</span><span class="muted">${depth}</span></div>
+    ${line ? `<div class="engine-line">${line}</div>` : ''}
+    ${summaryHtml(g)}`;
+}
+
+let ChessLib = null;
+let chessLibLoading = null;
+function loadChessLib() {
+  chessLibLoading ??= import('/vendor/chess.js').then((mod) => {
+    ChessLib = mod;
+    if (state.game) renderAnalysis();
+  });
+}
+
+/** The engine's best line in SAN with move numbers, e.g. "13. Nxe5 dxe5 14. Qh5+". */
+function pvHtml(fen, pv) {
+  if (!ChessLib) {
+    loadChessLib();
+    return `<span class="pv-move">${esc(pv.slice(0, PV_PLIES).join(' '))}</span>`;
+  }
+  const chess = new ChessLib.Chess(fen);
+  let [, color, , , , moveNo] = fen.split(' ');
+  moveNo = Number(moveNo);
+  const out = [];
+  for (const uci of pv.slice(0, PV_PLIES)) {
+    let san;
+    try {
+      san = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san;
+    } catch {
+      break;
+    }
+    if (color === 'w') out.push(`${moveNo}.`);
+    else if (!out.length) out.push(`${moveNo}…`);
+    out.push(`<span class="pv-move">${esc(san)}</span>`);
+    if (color === 'b') moveNo++;
+    color = other(color);
+  }
+  return out.join(' ');
+}
+
+/** Classification of move i, or null until both positions around it are analysed. */
+function moveClass(g, i) {
+  const fens = positions(g);
+  const before = engine.cache.get(fens[i]);
+  const after = engine.cache.get(fens[i + 1]);
+  if (!before || !after) return null;
+  const m = g.history[i];
+  return { ...classify(before, after, m.color, m.uci), before, after };
+}
+
+function classBadge(g, i) {
+  const c = moveClass(g, i);
+  if (!c) return '';
+  const { label: name, symbol } = CLASSES[c.kind];
+  return `<span class="mv-class ${c.kind}" title="${name} (${formatEval(c.before)} → ${formatEval(c.after)})">${symbol}</span>`;
+}
+
+/** Accuracy and inaccuracy / mistake / blunder counts per side, over the moves analysed so far. */
+function summaryHtml(g) {
+  const sides = {};
+  for (const color of ['w', 'b']) sides[color] = { acc: [], counts: { inaccuracy: 0, mistake: 0, blunder: 0 } };
+  g.history.forEach((m, i) => {
+    const c = moveClass(g, i);
+    if (!c) return;
+    sides[m.color].acc.push(moveAccuracy(c.before, c.after, m.color));
+    if (c.kind in sides[m.color].counts) sides[m.color].counts[c.kind]++;
+  });
+  const row = (color) => {
+    const s = sides[color];
+    if (!s.acc.length) return '';
+    const acc = s.acc.reduce((a, b) => a + b, 0) / s.acc.length;
+    const counts = Object.entries(s.counts)
+      .map(([kind, n]) => `<span class="count"><span class="mv-class ${kind}" title="${CLASSES[kind].label}">${CLASSES[kind].symbol}</span>${n}</span>`)
+      .join('');
+    return `<div class="summary-row"><span><b>${esc(label(g, color))}</b> · accuracy ${acc.toFixed(1)}%</span><span class="counts">${counts}</span></div>`;
+  };
+  const rows = row('w') + row('b');
+  return rows ? `<div class="engine-summary">${rows}</div>` : '';
+}
 
 // ---------------------------------------------------------------- board input
 
@@ -856,6 +1043,13 @@ $('#flip-btn').addEventListener('click', () => {
   state.orientation = other(state.orientation);
   renderBoard();
   renderBars();
+  renderAnalysis();
+});
+
+$('#engine-btn').addEventListener('click', () => {
+  state.showEngine = !state.showEngine;
+  save('engine', state.showEngine);
+  renderGame();
 });
 
 $('#sound-btn').addEventListener('click', () => {

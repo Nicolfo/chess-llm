@@ -4,7 +4,9 @@
 FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+# keep only the Stockfish build the app serves (about 2 MB of the 200 MB package)
+RUN npm ci --omit=dev && npm cache clean --force \
+    && find node_modules/stockfish/bin -type f ! -name "*-lite-single.*" -delete
 
 # Runtime
 FROM node:24-alpine
