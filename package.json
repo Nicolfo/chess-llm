@@ -8,7 +8,7 @@
     "dev": "node --env-file-if-exists=.env --watch src/server.js"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@langfuse/otel": "^6.0.2",

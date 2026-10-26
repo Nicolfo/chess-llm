@@ -218,3 +218,7 @@ Games live in memory and are dropped after 6 h idle or on restart. LLM calls use
 
 - Model logos: [lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT); trademarks belong to their owners.
 - Piece images: Cburnett set from Wikimedia Commons (CC BY-SA 3.0), via the cm-chessboard sprite.
+
+## License
+
+[MIT](LICENSE). Bundled third-party assets keep their own licenses (see Credits).
