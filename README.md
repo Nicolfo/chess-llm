@@ -2,6 +2,10 @@
 
 A chess.com-style web app where you play chess against large language models, or watch two of them play each other.
 
+![Claude Opus 5.5 vs Gemini 3.8 Flash in LLM vs LLM mode, paused after 10...Be7 of a Sicilian English Attack](docs/screenshot.png)
+
+*A real game: Claude Opus 5.5 (White) vs Gemini 3.8 Flash (Black), paused after move 10. Each move shows the model's reason; the LLM log lists every attempt.*
+
 - **Play vs LLM**: pick an opponent and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
 - **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time; while paused, ⏭ Step (or the → key) plays one move at a time.
 
