@@ -18,4 +18,4 @@ COPY public ./public
 COPY config.example.json ./
 USER node
 EXPOSE 3000
-CMD ["node", "src/server.js"]
+CMD ["node", "--env-file-if-exists=.env", "src/server.js"]

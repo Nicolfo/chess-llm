@@ -9,6 +9,10 @@ A chess.com-style web app where you play chess against large language models, or
 - **Play vs LLM**: pick an opponent and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
 - **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time; while paused, ⏭ Step (or the → key) plays one move at a time.
 
+<p align="center">
+  <img src="docs/llm-vs-llm.png" alt="LLM vs LLM setup: Claude Opus 5.5 selected for White, Gemini 3.8 Flash for Black" width="480">
+</p>
+
 Any model behind the **Anthropic Messages API** or an **OpenAI-compatible Chat Completions API** works: Claude, GPT, Gemini, DeepSeek, Kimi, OpenRouter, or local models through Ollama / LM Studio / vLLM.
 
 Illegal moves are caught by the server and sent back to the model to try again. Checkmate, stalemate, draws and resignations end the game.
@@ -17,8 +21,8 @@ Illegal moves are caught by the server and sent back to the model to try again. 
 
 | | |
 |---|---|
-| **Node.js 22.9 or newer** | Check with `node --version`. Download from [nodejs.org](https://nodejs.org) (the LTS version is fine). npm comes with it. |
-| **Git** | To clone the repository ([git-scm.com](https://git-scm.com)). You can also download the ZIP from GitHub instead. |
+| **Docker** | For [Run with Docker](#run-with-docker) (recommended). [Docker Desktop](https://docs.docker.com/get-docker/) on Windows / macOS, Docker Engine on Linux. |
+| **or Node.js 22.9+ and Git** | For [Run from source](#run-from-source-nodejs). Check with `node --version`; download from [nodejs.org](https://nodejs.org) (LTS is fine) and [git-scm.com](https://git-scm.com). |
 | **At least one LLM API key** | From any provider you want to play against, e.g. [Anthropic](https://console.anthropic.com), [OpenAI](https://platform.openai.com/api-keys), [Google AI Studio](https://aistudio.google.com/apikey), [DeepSeek](https://platform.deepseek.com), [Moonshot](https://platform.moonshot.ai). Or no key at all if you run a local model with [Ollama](https://ollama.com). |
 | A modern browser | Chrome, Edge, Firefox or Safari. |
 
@@ -26,7 +30,92 @@ Optional: a [Langfuse](https://langfuse.com) account if you want to trace every 
 
 Calls to paid APIs cost money. A full game is roughly 40 to 80 LLM calls per model, more with reasoning models.
 
-## Quick start
+## Run with Docker
+
+The quickest way to start: no Node.js and no need to clone the repo. You only need [Docker](https://docs.docker.com/get-docker/) (Docker Desktop on Windows / macOS) and a `.env` file with your API keys.
+
+A ready-made image is published as `registry.nicolfo.it/nicolfo/chess-llm`. It contains only the app. **Your API keys are not in it**: you pass them in when you start the container.
+
+### 1. Create a folder with your `.env` file (required)
+
+```bash
+# macOS / Linux / Git Bash
+mkdir chess-llm && cd chess-llm
+curl -o .env https://raw.githubusercontent.com/Nicolfo/chess-llm/main/.env.example
+```
+
+```powershell
+# Windows PowerShell
+mkdir chess-llm; cd chess-llm
+Invoke-WebRequest https://raw.githubusercontent.com/Nicolfo/chess-llm/main/.env.example -OutFile .env
+```
+
+Open `.env` and fill in the key of every provider you want to play against:
+
+```ini
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=
+MOONSHOT_API_KEY=
+DEEPSEEK_API_KEY=
+```
+
+Without keys the app starts, but every LLM move fails with an authentication error.
+
+### 2. Choose the models (optional)
+
+By default the image shows the models of [`config.example.json`](config.example.json) (Claude, GPT, Gemini, Kimi, DeepSeek). To change the list, download it as `config.json` into the same folder and edit it (see [Configuring opponents](#configuring-opponents)):
+
+```bash
+curl -o config.json https://raw.githubusercontent.com/Nicolfo/chess-llm/main/config.example.json
+# PowerShell: Invoke-WebRequest https://raw.githubusercontent.com/Nicolfo/chess-llm/main/config.example.json -OutFile config.json
+```
+
+### 3. Start the container
+
+Run this from the folder that contains `.env`. Docker downloads the image the first time.
+
+Default models (`.env` only):
+
+```bash
+# macOS / Linux / Git Bash
+docker run --rm -p 3000:3000 -v "$PWD/.env:/app/.env:ro" registry.nicolfo.it/nicolfo/chess-llm
+```
+
+```powershell
+# Windows PowerShell
+docker run --rm -p 3000:3000 -v "${PWD}/.env:/app/.env:ro" registry.nicolfo.it/nicolfo/chess-llm
+```
+
+With your own `config.json` from step 2, add a second `-v`:
+
+```bash
+docker run --rm -p 3000:3000 -v "$PWD/.env:/app/.env:ro" -v "$PWD/config.json:/app/config.json:ro" registry.nicolfo.it/nicolfo/chess-llm
+```
+
+Open **http://localhost:3000**. Stop the container with Ctrl+C. To update to the newest version later: `docker pull registry.nicolfo.it/nicolfo/chess-llm`.
+
+What the options do:
+
+| option | |
+|---|---|
+| `-p 3000:3000` | makes the app reachable on http://localhost:3000. Use `-p 8080:3000` for port 8080 |
+| `-v "$PWD/.env:/app/.env:ro"` | gives the container your `.env` (read-only). The app reads it on startup, exactly like `npm start` |
+| `-v "$PWD/config.json:/app/config.json:ro"` | replaces the default model list with yours |
+| `-e APP_PASSWORD=...` | optional: require a password to open the site (see [Password protection](#password-protection)) |
+| `--rm` | deletes the container when it stops (games are in memory anyway) |
+
+Common mistakes:
+
+- **`node: .env: invalid format` and the container exits**: `.env` didn't exist at the given path (usually: `docker run` started from another folder), so Docker created an empty `.env` folder there instead. Delete that folder, `cd` into `chess-llm`, check that `ls .env` shows the file, and run again.
+- **Editing `.env` or `config.json` while the container runs**: restart the container to apply the changes.
+- **`docker run --env-file .env` instead of the `-v` mount**: works only if no value in `.env` is quoted, because Docker keeps the quotes as part of the value.
+
+To build the image yourself instead (e.g. after changing the code), run `docker build -t chess-llm .` in a clone of the repo and use `chess-llm` as the image name in the commands above.
+
+## Run from source (Node.js)
+
+For development, or if you prefer not to use Docker. Needs Node.js 22.9+ and Git.
 
 ### 1. Get the code and install dependencies
 
