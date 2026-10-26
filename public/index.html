@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess LLM</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♞</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="logo" href="#/"><span class="logo-icon">♞</span> Chess<span class="logo-accent">LLM</span></a>
+    <span class="topbar-sub">Play chess against large language models</span>
+  </header>
+
+  <!-- Lobby -->
+  <main id="lobby" class="lobby" hidden>
+    <section class="lobby-card">
+      <div class="mode-tabs" role="tablist">
+        <button type="button" class="mode-tab" data-mode="human" role="tab">♟ Play vs LLM</button>
+        <button type="button" class="mode-tab" data-mode="watch" role="tab">👁 LLM vs LLM</button>
+      </div>
+
+      <div id="watch-setup" hidden>
+        <p class="muted">Watch two models play each other. Their reasoning is shown for every move.</p>
+        <div class="watch-grid">
+          <div>
+            <div class="side-label"><svg viewBox="0 0 40 40"><use href="pieces.svg#wk"/></svg> White</div>
+            <div id="white-list" class="llm-list compact"></div>
+          </div>
+          <button type="button" id="swap-btn" class="btn btn-ghost swap-btn" title="Swap sides">⇄</button>
+          <div>
+            <div class="side-label"><svg viewBox="0 0 40 40"><use href="pieces.svg#bk"/></svg> Black</div>
+            <div id="black-list" class="llm-list compact"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="human-setup">
+      <p class="muted">Choose your opponent</p>
+      <div id="llm-list" class="llm-list"></div>
+
+      <p class="muted">I play as</p>
+      <div class="color-picker" role="radiogroup" aria-label="Side">
+        <button type="button" class="color-btn" data-color="white" title="White">
+          <svg viewBox="0 0 40 40"><use href="pieces.svg#wk"/></svg><span>White</span>
+        </button>
+        <button type="button" class="color-btn" data-color="random" title="Random">
+          <span class="random-icon"><svg viewBox="0 0 40 40"><use href="pieces.svg#wk"/></svg><svg viewBox="0 0 40 40"><use href="pieces.svg#bk"/></svg></span><span>Random</span>
+        </button>
+        <button type="button" class="color-btn" data-color="black" title="Black">
+          <svg viewBox="0 0 40 40"><use href="pieces.svg#bk"/></svg><span>Black</span>
+        </button>
+      </div>
+      </div>
+
+      <button id="play-btn" class="btn btn-primary btn-big" disabled>Play</button>
+      <p id="lobby-error" class="error" hidden></p>
+    </section>
+  </main>
+
+  <!-- Game -->
+  <main id="game" class="game" hidden>
+    <section class="board-column">
+      <div class="player-bar" id="bar-top">
+        <div class="avatar"></div>
+        <div class="player-info">
+          <div class="player-name"></div>
+          <div class="captured"></div>
+        </div>
+        <div class="thinking-indicator" hidden><span></span><span></span><span></span></div>
+      </div>
+
+      <div class="board-wrap">
+        <div id="board" class="board"></div>
+        <div id="promotion" class="promotion" hidden></div>
+      </div>
+
+      <div class="player-bar" id="bar-bottom">
+        <div class="avatar"></div>
+        <div class="player-info">
+          <div class="player-name"></div>
+          <div class="captured"></div>
+        </div>
+        <div class="thinking-indicator" hidden><span></span><span></span><span></span></div>
+      </div>
+    </section>
+
+    <aside class="side-panel">
+      <div class="panel-header">
+        <div id="status-text" class="status-text"></div>
+      </div>
+
+      <div id="reason-callout" class="reason-callout" hidden></div>
+
+      <div class="panel-section moves-section">
+        <h2>Moves</h2>
+        <ol id="move-list" class="move-list"></ol>
+      </div>
+
+      <div class="panel-section log-section">
+        <h2>LLM log <span class="muted small">(answers &amp; rejected moves)</span></h2>
+        <div id="llm-log" class="llm-log"></div>
+      </div>
+
+      <div class="panel-actions">
+        <button id="flip-btn" class="btn btn-ghost" title="Flip board">⇅ Flip</button>
+        <button id="pgn-btn" class="btn btn-ghost" title="Copy PGN">⧉ PGN</button>
+        <button id="sound-btn" class="btn btn-ghost" title="Toggle sound">🔊</button>
+        <button id="reasons-btn" class="btn btn-ghost" title="Show the LLM's reason for each move">💬 Reasons</button>
+        <button id="pause-btn" class="btn btn-ghost" title="Pause / resume">⏸ Pause</button>
+        <button id="step-btn" class="btn btn-ghost" title="Play the next move (→)">⏭ Step</button>
+        <button id="resign-btn" class="btn btn-ghost btn-danger" title="Resign">⚑ Resign</button>
+        <button id="new-btn" class="btn btn-primary">New game</button>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Result modal -->
+  <div id="result-modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div id="result-title" class="modal-title"></div>
+      <div id="result-text" class="modal-text"></div>
+      <div id="result-detail" class="modal-detail" hidden></div>
+      <div class="modal-actions">
+        <button id="rematch-btn" class="btn btn-primary">Rematch</button>
+        <button id="modal-new-btn" class="btn btn-secondary">New game</button>
+        <button id="modal-close-btn" class="btn btn-ghost">Review board</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <footer class="footer">
+    Piece set: Cburnett via Wikimedia Commons (CC BY-SA 3.0), sprite from cm-chessboard.
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

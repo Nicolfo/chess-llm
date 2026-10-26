@@ -1,0 +1,122 @@
+import { shutdownTracing } from './instrumentation.js'; // first: sets up tracing before other modules load
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import express from 'express';
+import { loadConfig } from './config.js';
+import { Game, GameError } from './game.js';
+import { LlmError } from './llm.js';
+
+const config = loadConfig();
+const games = new Map();
+const GAME_TTL_MS = 6 * 60 * 60 * 1000;
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public')));
+
+// API keys and base URLs never leave the server.
+app.get('/api/llms', (req, res) => {
+  res.json(config.llms.map(({ id, name, provider, model, description, icon }) => ({ id, name, provider, model, description, icon })));
+});
+
+// { mode: 'human', llmId, color: 'white' | 'black' | 'random' }  play against an LLM
+// { mode: 'watch', whiteLlmId, blackLlmId }                       watch two LLMs play each other
+app.post('/api/games', (req, res) => {
+  const { mode = 'human', llmId, color = 'random', whiteLlmId, blackLlmId } = req.body ?? {};
+  let white;
+  let black;
+  if (mode === 'watch') {
+    white = findLlm(whiteLlmId);
+    black = findLlm(blackLlmId);
+  } else if (mode === 'human') {
+    const llm = findLlm(llmId);
+    if (!['white', 'black', 'random'].includes(color)) throw new GameError('color must be white, black or random');
+    const side = color === 'random' ? (Math.random() < 0.5 ? 'white' : 'black') : color;
+    [white, black] = side === 'white' ? [null, llm] : [llm, null];
+  } else {
+    throw new GameError('mode must be human or watch');
+  }
+
+  const game = new Game({
+    white,
+    black,
+    maxAttempts: config.maxAttempts,
+    requestTimeoutMs: config.requestTimeoutMs,
+  });
+  games.set(game.id, game);
+  res.status(201).json(game);
+});
+
+app.get('/api/games/:id', (req, res) => {
+  res.json(getGame(req.params.id));
+});
+
+app.post('/api/games/:id/move', (req, res) => {
+  const game = getGame(req.params.id);
+  const { from, to, promotion } = req.body ?? {};
+  game.playerMove({ from, to, promotion });
+  res.json(game);
+});
+
+app.post('/api/games/:id/llm-move', async (req, res) => {
+  const game = getGame(req.params.id);
+  await game.llmMove();
+  res.json(game);
+});
+
+app.post('/api/games/:id/resign', (req, res) => {
+  const game = getGame(req.params.id);
+  game.resign();
+  res.json(game);
+});
+
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+app.use((err, req, res, next) => {
+  if (err instanceof GameError) return res.status(err.status).json({ error: err.message });
+  if (err instanceof LlmError) {
+    console.warn('[llm]', err.message);
+    return res.status(502).json({ error: err.message });
+  }
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON body' });
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+function findLlm(id) {
+  const llm = config.llms.find((l) => l.id === id);
+  if (!llm) throw new GameError(`Unknown LLM "${id}"`, 404);
+  return llm;
+}
+
+function getGame(id) {
+  const game = games.get(id);
+  if (!game) throw new GameError('Game not found', 404);
+  return game;
+}
+
+setInterval(() => {
+  const cutoff = Date.now() - GAME_TTL_MS;
+  for (const [id, game] of games) {
+    if (game.touchedAt < cutoff && !game.thinking) games.delete(id);
+  }
+}, 10 * 60 * 1000).unref();
+
+const server = app.listen(config.port, () => {
+  console.log(`Chess LLM running at http://localhost:${config.port}`);
+  console.log(`Config: ${config.file} (${config.llms.length} LLMs: ${config.llms.map((l) => l.name).join(', ')})`);
+  for (const llm of config.llms) {
+    if (!llm.apiKey) console.warn(`[config] "${llm.name}" has no apiKey (fine for local servers, otherwise set it)`);
+  }
+});
+
+// Flush buffered traces before exiting.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, async () => {
+    server.close();
+    await shutdownTracing().catch((err) => console.error('[langfuse] shutdown failed:', err.message));
+    process.exit(0);
+  });
+}
