@@ -7,3 +7,6 @@ config.json
 # Helm secrets
 helm/values-secret.yaml
 helm/charts/
+
+# Saved games
+data/

@@ -18,6 +18,8 @@ COPY package.json ./
 COPY src ./src
 COPY public ./public
 COPY config.example.json ./
+# saved games; mount a volume here to keep them across container restarts
+RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3000
 CMD ["node", "--env-file-if-exists=.env", "src/server.js"]

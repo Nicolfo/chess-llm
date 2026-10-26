@@ -7,12 +7,16 @@ import { authMiddleware } from './auth.js';
 import { loadConfig } from './config.js';
 import { Game, GameError } from './game.js';
 import { LlmError } from './llm.js';
+import { GameStore } from './store.js';
 
 const config = loadConfig();
-const games = new Map();
-const GAME_TTL_MS = 6 * 60 * 60 * 1000;
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const store = new GameStore(process.env.DATA_DIR ?? path.join(ROOT, 'data'));
+const games = new Map(); // games in use, loaded from the store on demand
+const MEMORY_TTL_MS = 6 * 60 * 60 * 1000; // idle games leave memory (they stay on disk)
+const RETENTION_MS = Number(process.env.GAME_RETENTION_DAYS ?? 30) * 24 * 60 * 60 * 1000;
 
-const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+const PUBLIC_DIR = path.join(ROOT, 'public');
 
 const app = express();
 app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
@@ -69,6 +73,7 @@ app.post('/api/games', (req, res) => {
     requestTimeoutMs: config.requestTimeoutMs,
   });
   games.set(game.id, game);
+  store.save(game);
   res.status(201).json(game);
 });
 
@@ -80,18 +85,24 @@ app.post('/api/games/:id/move', (req, res) => {
   const game = getGame(req.params.id);
   const { from, to, promotion } = req.body ?? {};
   game.playerMove({ from, to, promotion });
+  store.save(game);
   res.json(game);
 });
 
 app.post('/api/games/:id/llm-move', async (req, res) => {
   const game = getGame(req.params.id);
-  await game.llmMove();
+  try {
+    await game.llmMove();
+  } finally {
+    store.save(game); // also keeps failed attempts, so the log survives a restart
+  }
   res.json(game);
 });
 
 app.post('/api/games/:id/resign', (req, res) => {
   const game = getGame(req.params.id);
   game.resign();
+  store.save(game);
   res.json(game);
 });
 
@@ -124,20 +135,31 @@ function findLlm(id) {
 }
 
 function getGame(id) {
-  const game = games.get(id);
-  if (!game) throw new GameError('Game not found', 404);
+  let game = games.get(id);
+  if (!game) {
+    const saved = store.load(id);
+    if (!saved) throw new GameError('Game not found', 404);
+    game = Game.restore(saved, config);
+    games.set(id, game);
+  }
   return game;
 }
 
 setInterval(() => {
-  const cutoff = Date.now() - GAME_TTL_MS;
+  const cutoff = Date.now() - MEMORY_TTL_MS;
   for (const [id, game] of games) {
     if (game.touchedAt < cutoff && !game.thinking) games.delete(id);
   }
 }, 10 * 60 * 1000).unref();
 
+if (RETENTION_MS > 0) {
+  store.prune(RETENTION_MS);
+  setInterval(() => store.prune(RETENTION_MS), 6 * 60 * 60 * 1000).unref();
+}
+
 const server = app.listen(config.port, () => {
   console.log(`Chess LLM running at http://localhost:${config.port}`);
+  console.log(`Games: ${store.dir} (${store.count()} saved)`);
   console.log(`Config: ${config.file} (${config.llms.length} LLMs: ${config.llms.map((l) => l.name).join(', ')})`);
   for (const llm of config.llms) {
     if (!llm.apiKey) console.warn(`[config] "${llm.name}" has no apiKey (fine for local servers, otherwise set it)`);

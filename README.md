@@ -80,18 +80,18 @@ Default models (`.env` only):
 
 ```bash
 # macOS / Linux / Git Bash
-docker run --rm -p 3000:3000 -v "$PWD/.env:/app/.env:ro" registry.nicolfo.it/nicolfo/chess-llm
+docker run --rm -p 3000:3000 -v "$PWD/.env:/app/.env:ro" -v chess-llm-data:/app/data registry.nicolfo.it/nicolfo/chess-llm
 ```
 
 ```powershell
 # Windows PowerShell
-docker run --rm -p 3000:3000 -v "${PWD}/.env:/app/.env:ro" registry.nicolfo.it/nicolfo/chess-llm
+docker run --rm -p 3000:3000 -v "${PWD}/.env:/app/.env:ro" -v chess-llm-data:/app/data registry.nicolfo.it/nicolfo/chess-llm
 ```
 
 With your own `config.json` from step 2, add a second `-v`:
 
 ```bash
-docker run --rm -p 3000:3000 -v "$PWD/.env:/app/.env:ro" -v "$PWD/config.json:/app/config.json:ro" registry.nicolfo.it/nicolfo/chess-llm
+docker run --rm -p 3000:3000 -v "$PWD/.env:/app/.env:ro" -v "$PWD/config.json:/app/config.json:ro" -v chess-llm-data:/app/data registry.nicolfo.it/nicolfo/chess-llm
 ```
 
 Open **http://localhost:3000**. Stop the container with Ctrl+C. To update to the newest version later: `docker pull registry.nicolfo.it/nicolfo/chess-llm`.
@@ -104,7 +104,8 @@ What the options do:
 | `-v "$PWD/.env:/app/.env:ro"` | gives the container your `.env` (read-only). The app reads it on startup, exactly like `npm start` |
 | `-v "$PWD/config.json:/app/config.json:ro"` | replaces the default model list with yours |
 | `-e APP_PASSWORD=...` | optional: require a password to open the site (see [Password protection](#password-protection)) |
-| `--rm` | deletes the container when it stops (games are in memory anyway) |
+| `-v chess-llm-data:/app/data` | keeps your games in a Docker volume named `chess-llm-data`, so they survive stopping and updating the container. Leave it out and games are lost when the container stops |
+| `--rm` | deletes the container when it stops (the games stay in the volume) |
 
 Common mistakes:
 
@@ -162,6 +163,8 @@ npm start
 Open **http://localhost:3000**, pick a mode and an opponent, and press **Play**.
 
 Use `npm run dev` instead to restart automatically when you edit the code.
+
+Games are saved in the `data/` folder (one JSON file per game), so they survive restarts: reload the page and pick up where you left off.
 
 ## Configuring opponents
 
@@ -222,7 +225,7 @@ Per-model settings:
 
 API keys and base URLs never leave the server; the browser only sees each model's id, name, provider and model.
 
-Other environment variables: `CHESS_LLM_CONFIG=/path/to/file.json` uses another config file, `PORT` overrides the port. If `config.json` is missing, the server falls back to `config.example.json`.
+Other environment variables: `CHESS_LLM_CONFIG=/path/to/file.json` uses another config file, `PORT` overrides the port, `DATA_DIR` changes where games are saved (default `data/`), and `GAME_RETENTION_DAYS` (default 30, `0` = forever) deletes games nobody has played for that long. If `config.json` is missing, the server falls back to `config.example.json`.
 
 Endpoints used in `config.example.json` (everything except Anthropic goes through the OpenAI-compatible API):
 
@@ -277,7 +280,7 @@ kubectl create secret generic chess-llm-auth -n chess-llm --from-literal=passwor
 ```
 
 The models list lives under `config` in `helm/values.yaml`. Set `auth.enabled: false` to run without a password.
-Games are kept in memory, so the chart runs a single replica.
+Games are saved on a 1 Gi volume (`persistence` in `helm/values.yaml`, storage class `local-path`), which is kept even if you `helm uninstall`. The chart runs a single replica because games are also cached in memory and the volume is ReadWriteOnce.
 
 ## Troubleshooting
 
@@ -325,6 +328,7 @@ src/llm.js              Anthropic / OpenAI HTTP clients, traced as generations
 src/instrumentation.js  Langfuse / OpenTelemetry setup (imported first)
 src/config.js           config loading + ${ENV} expansion
 src/auth.js             optional password login (APP_PASSWORD)
+src/store.js            saved games (one JSON file per game in DATA_DIR)
 public/engine.js        Stockfish (WASM) in a Web Worker, eval and move classification
 helm/                   Helm chart; Dockerfile at the root
 public/                 front-end (vanilla JS, no build step)
@@ -341,7 +345,7 @@ REST API:
 | POST | `/api/games/:id/llm-move` | |
 | POST | `/api/games/:id/resign` | |
 
-Games live in memory and are dropped after 6 h idle or on restart. LLM calls use their own undici agent so Node's built-in 300 s fetch limit doesn't cut off long reasoning.
+Games are saved as one JSON file per game (`src/store.js`, written atomically after every move) and loaded on demand, so a restart loses nothing; a move that was being thought about when the server stopped is simply asked again. LLM calls use their own undici agent so Node's built-in 300 s fetch limit doesn't cut off long reasoning.
 
 ## Credits
 

@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "chess-llm.labels" . | nindent 4 }}
 spec:
-  replicas: 1 # games live in memory, so one replica
+  replicas: 1 # games are cached in memory and the volume is ReadWriteOnce, so one replica
   strategy:
     type: Recreate
   selector:
@@ -23,6 +23,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: app
           image: "{{ .Values.app.imageName }}:{{ .Values.app.imageTag }}"
@@ -35,6 +36,10 @@ spec:
               value: {{ .Values.app.port | quote }}
             - name: CHESS_LLM_CONFIG
               value: /app/config/config.json
+            - name: DATA_DIR
+              value: /app/data
+            - name: GAME_RETENTION_DAYS
+              value: {{ .Values.persistence.retentionDays | quote }}
             {{- range $key, $value := .Values.app.env }}
             - name: {{ $key }}
               value: {{ $value | toString | quote }}
@@ -55,6 +60,8 @@ spec:
             - name: config
               mountPath: /app/config
               readOnly: true
+            - name: data
+              mountPath: /app/data
           readinessProbe:
             httpGet:
               path: /healthz
@@ -77,3 +84,10 @@ spec:
         - name: config
           configMap:
             name: {{ .Release.Name }}-config
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

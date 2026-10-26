@@ -35,9 +35,10 @@ export class Game {
   /**
    * @param white / black  an LLM entry from config.llms, or null for the human player
    */
-  constructor({ white, black, maxAttempts, requestTimeoutMs }) {
+  constructor({ white, black, maxAttempts, requestTimeoutMs, id = crypto.randomUUID() }) {
     if (!white && !black) throw new GameError('At least one side must be an LLM');
-    this.id = crypto.randomUUID();
+    this.id = id;
+    this.createdAt = Date.now();
     this.players = { w: white, b: black };
     this.mode = white && black ? 'watch' : 'human';
     this.playerColor = !white ? 'w' : !black ? 'b' : null; // human's side, null when watching
@@ -105,6 +106,11 @@ export class Game {
     const color = this.chess.turn();
     const llm = this.players[color];
     if (!llm) throw new GameError("It is not an LLM's turn");
+    if (llm.missing) {
+      // shown like a provider error (with Retry), so the client doesn't keep asking
+      this.lastError = `${llm.name} is no longer in the server's config, so this game can't continue`;
+      throw new GameError(this.lastError, 422);
+    }
     if (this.thinking) throw new GameError('The LLM is already thinking', 409);
 
     this.thinking = true;
@@ -298,6 +304,46 @@ export class Game {
 
   touch() {
     this.touchedAt = Date.now();
+  }
+
+  /** Everything needed to rebuild the game after a restart. API keys and URLs are never stored. */
+  serialize() {
+    const info = (llm) => llm && { id: llm.id, name: llm.name, provider: llm.provider, model: llm.model, icon: llm.icon };
+    return {
+      version: 1,
+      id: this.id,
+      createdAt: this.createdAt,
+      touchedAt: this.touchedAt,
+      players: { w: info(this.players.w), b: info(this.players.b) },
+      pgn: this.chess.pgn(),
+      reasons: this.reasons,
+      result: this.result,
+      llmTurns: this.llmTurns,
+      lastError: this.lastError,
+    };
+  }
+
+  /** Rebuild a saved game. Players are looked up in the current config by id. */
+  static restore(data, { llms, maxAttempts, requestTimeoutMs }) {
+    // A model removed from the config keeps its name on screen but can't move any more.
+    const player = (saved) => saved && (llms.find((l) => l.id === saved.id) ?? { ...saved, missing: true });
+    const game = new Game({ white: player(data.players.w), black: player(data.players.b), maxAttempts, requestTimeoutMs, id: data.id });
+    game.chess.loadPgn(data.pgn);
+    game.createdAt = data.createdAt;
+    game.touchedAt = data.touchedAt;
+    game.reasons = data.reasons ?? [];
+    game.result = data.result;
+    game.llmTurns = data.llmTurns ?? [];
+    game.lastError = data.lastError;
+
+    // A turn that was in progress when the server stopped: offer a retry instead of waiting forever.
+    const turn = game.llmTurns.at(-1);
+    if (turn && !turn.move && !turn.resigned && !turn.error && !game.result) {
+      if (turn.attempts.length) turn.error = 'Interrupted by a server restart';
+      else game.llmTurns.pop();
+      game.lastError = 'Interrupted by a server restart';
+    }
+    return game;
   }
 
   toJSON() {
