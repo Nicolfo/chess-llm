@@ -138,11 +138,19 @@ function openaiUsage(u) {
   if (!u) return undefined;
   // OpenAI-style counts are inclusive. DeepSeek reports cache hits as prompt_cache_hit_tokens.
   const cached = u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens ?? 0;
-  const reasoning = u.completion_tokens_details?.reasoning_tokens ?? 0;
+  let reasoning = u.completion_tokens_details?.reasoning_tokens ?? 0;
+  let output = u.completion_tokens;
+  // Gemini's OpenAI-compatible endpoint leaves thinking out of completion_tokens (and has no
+  // reasoning_tokens) but counts it in total_tokens: the gap is the hidden, billed thinking.
+  const hidden = (u.total_tokens ?? 0) - (u.prompt_tokens ?? 0) - (u.completion_tokens ?? 0);
+  if (!reasoning && hidden > 0 && output !== undefined) {
+    reasoning = hidden;
+    output += hidden;
+  }
   return compact({
     input: u.prompt_tokens !== undefined ? u.prompt_tokens - cached : undefined,
     input_cached_tokens: cached || undefined,
-    output: u.completion_tokens !== undefined ? u.completion_tokens - reasoning : undefined,
+    output: output !== undefined ? output - reasoning : undefined,
     output_reasoning_tokens: reasoning || undefined,
   });
 }
