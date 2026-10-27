@@ -251,6 +251,19 @@ Endpoints used in `config.example.json` (everything except Anthropic goes throug
 | Moonshot | openai | https://api.moonshot.ai/v1 | kimi-k3 |
 | DeepSeek | openai | https://api.deepseek.com | deepseek-v4-pro, deepseek-flash |
 
+> **OpenRouter** works through the `openai` provider with `"baseUrl": "https://openrouter.ai/api/v1"`. Use OpenRouter's model ids (`vendor/model`) and put `OPENROUTER_API_KEY=...` in `.env`:
+>
+> ```json
+> {
+>   "id": "or-claude-opus",
+>   "name": "Claude Opus 5.5 (OpenRouter)",
+>   "provider": "openai",
+>   "baseUrl": "https://openrouter.ai/api/v1",
+>   "apiKey": "${OPENROUTER_API_KEY}",
+>   "model": "anthropic/claude-opus-5-5"
+> }
+> ```
+
 ## How a turn works
 
 1. You move (drag & drop or click-click). The server validates it with [chess.js](https://github.com/jhlywa/chess.js).
