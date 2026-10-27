@@ -8,6 +8,14 @@ import { type ChatMessage, chat } from './llm.ts';
 const COLOR_NAME: Record<Color, string> = { w: 'White', b: 'Black' };
 const OTHER: Record<Color, Color> = { w: 'b', b: 'w' };
 const MAX_REASON_LENGTH = 500;
+// Draw offers: from this move number, at most once per side every DRAW_COOLDOWN_MOVES moves,
+// so a model can't use them to escape every hard position.
+const DRAW_MIN_MOVE = 30;
+const DRAW_COOLDOWN_MOVES = 10;
+// Stockfish offers a draw when its evaluation is within this many centipawns of equal,
+// and accepts one when it is no better than this for itself.
+const ENGINE_DRAW_CP = 25;
+const ACCEPT_DRAW = /^(accept[-_ ]?draw|accept|draw)$/i;
 
 /** What is shown and saved about a player; never the API key or URL. */
 interface PlayerInfo {
@@ -47,6 +55,8 @@ export interface LlmTurn {
   move: string | null;
   reason: string | null;
   resigned: boolean;
+  drawOffered?: boolean; // offered a draw along with its move
+  drawAccepted?: boolean; // accepted the opponent's offer instead of moving
   error: string | null;
 }
 
@@ -59,6 +69,7 @@ export interface SavedGame {
   players: Record<Color, PlayerInfo | null>;
   pgn: string;
   reasons: (string | null)[];
+  drawOffers?: number[];
   result: GameResult | null;
   llmTurns: LlmTurn[];
   lastError: string | null;
@@ -112,6 +123,7 @@ export class Game {
   readonly requestTimeoutMs: number;
   readonly chess: Chess;
   reasons: (string | null)[];
+  drawOffers: number[];
   result: GameResult | null;
   thinking: boolean;
   llmTurns: LlmTurn[];
@@ -136,6 +148,7 @@ export class Game {
     this.chess.setHeader('White', this.nameOf('w'));
     this.chess.setHeader('Black', this.nameOf('b'));
     this.reasons = []; // reason given for the move at each ply (LLM moves only)
+    this.drawOffers = []; // plies whose move came with a draw offer; it stands until the opponent's next move
     this.result = null; // { winner: 'w' | 'b' | null, reason, text, detail? }
     this.thinking = false;
     this.llmTurns = []; // [{ ply, color, llm, attempts: [{ answer, move, error }], move, reason, resigned, error }]
@@ -162,16 +175,43 @@ export class Game {
     return `${this.labelOf(winner)} wins.`;
   }
 
-  playerMove({ from, to, promotion }: { from: string; to: string; promotion?: string }): void {
+  playerMove({ from, to, promotion, offerDraw }: { from: string; to: string; promotion?: string; offerDraw?: boolean }): void {
     this.touch();
     if (this.isOver) throw new GameError('Game is over');
     if (this.mode !== 'human' || this.chess.turn() !== this.playerColor) throw new GameError('It is not your turn');
+    const ply = this.chess.history().length;
+    if (offerDraw && !this.canOfferDraw(this.playerColor, ply)) {
+      throw new GameError(`You can offer a draw from move ${DRAW_MIN_MOVE}, once every ${DRAW_COOLDOWN_MOVES} moves`);
+    }
     try {
       this.chess.move({ from, to, promotion });
     } catch {
       throw new GameError(`Illegal move: ${from}-${to}${promotion ? `=${promotion}` : ''}`);
     }
+    if (offerDraw) this.drawOffers.push(ply);
     this.checkGameOver();
+  }
+
+  /** The human accepts the LLM's draw offer. */
+  acceptDraw(): void {
+    this.touch();
+    if (this.isOver) throw new GameError('Game is over');
+    if (this.mode !== 'human' || this.chess.turn() !== this.playerColor) throw new GameError('It is not your turn');
+    if (!this.drawOffered()) throw new GameError('There is no draw offer to accept');
+    this.finish(null, 'agreement', 'You accepted the draw offer. Draw agreed.');
+  }
+
+  /** Whether the side to move has a draw offer to answer: the last move came with one. */
+  drawOffered(): boolean {
+    const last = this.chess.history().length - 1;
+    return !this.isOver && last >= 0 && this.drawOffers.at(-1) === last;
+  }
+
+  /** Whether `color` may offer a draw with the move at `ply`. */
+  canOfferDraw(color: Color, ply: number): boolean {
+    if (this.isOver || Math.floor(ply / 2) + 1 < DRAW_MIN_MOVE) return false;
+    const own = this.drawOffers.filter((p) => (p % 2 === 0 ? 'w' : 'b') === color).at(-1);
+    return own === undefined || ply - own >= DRAW_COOLDOWN_MOVES * 2;
   }
 
   /** Pause or resume an LLM vs LLM game. A move already being thought about still completes. */
@@ -247,6 +287,7 @@ export class Game {
         moveNumber: Math.floor(turn.ply / 2) + 1,
         opponentLastMove: last?.san ?? null,
         fen: this.chess.fen(),
+        ...(this.drawOffered() ? { drawOfferPending: true } : {}),
       },
     });
     const opponent = { 'vs-human': 'a human', 'vs-engine': 'a chess engine', 'llm-vs-llm': 'another AI model' }[this.opponentKind(color)];
@@ -262,7 +303,7 @@ export class Game {
         });
         const attempt: Attempt = { answer, move: null, error: null };
         turn.attempts.push(attempt);
-        const { move, reason } = parseAnswer(answer);
+        const { move, reason, offersDraw } = parseAnswer(answer);
 
         if (move && /^resign/i.test(move)) {
           attempt.move = 'resign';
@@ -274,23 +315,46 @@ export class Game {
           return;
         }
 
-        const validation = startObservation('validate-move', { input: { move } }, { asType: 'guardrail' });
-        const { san, error } = this.tryApply(move, color);
-        validation
-          .update(san ? { output: { legal: true, san } } : { output: { legal: false, error }, level: 'WARNING', statusMessage: error })
-          .end();
+        let error: string | undefined;
+        if (move && ACCEPT_DRAW.test(move)) {
+          if (this.drawOffered()) {
+            attempt.move = 'accept-draw';
+            turn.drawAccepted = true;
+            turn.reason = reason;
+            this.finish(null, 'agreement', this.drawAcceptedText(color), reason);
+            agent.update({ output: { acceptedDraw: true, reason }, metadata: { attempts: turn.attempts.length } });
+            return;
+          }
+          error = 'There is no draw offer to accept. Play a move.';
+        } else {
+          const validation = startObservation('validate-move', { input: { move } }, { asType: 'guardrail' });
+          const applied = this.tryApply(move, color);
+          validation
+            .update(
+              applied.san
+                ? { output: { legal: true, san: applied.san } }
+                : { output: { legal: false, error: applied.error }, level: 'WARNING', statusMessage: applied.error },
+            )
+            .end();
 
-        if (san) {
-          attempt.move = san;
-          turn.move = san;
-          turn.reason = reason;
-          this.reasons[turn.ply] = reason;
-          this.checkGameOver();
-          agent.update({
-            output: { move: san, reason },
-            metadata: { attempts: turn.attempts.length, ...(this.result ? { result: this.result.reason } : {}) },
-          });
-          return;
+          if (applied.san) {
+            attempt.move = applied.san;
+            turn.move = applied.san;
+            turn.reason = reason;
+            this.reasons[turn.ply] = reason;
+            // an offer the prompt didn't allow (too early, too soon after the last one) is ignored
+            if (offersDraw && this.canOfferDraw(color, turn.ply)) {
+              this.drawOffers.push(turn.ply);
+              turn.drawOffered = true;
+            }
+            this.checkGameOver();
+            agent.update({
+              output: { move: applied.san, reason, ...(turn.drawOffered ? { drawOffered: true } : {}) },
+              metadata: { attempts: turn.attempts.length, ...(this.result ? { result: this.result.reason } : {}) },
+            });
+            return;
+          }
+          error = applied.error;
         }
 
         attempt.error = error ?? null;
@@ -329,6 +393,17 @@ export class Game {
     const result = await engineMove(engine, this.chess.history({ verbose: true }).map((m) => m.lan));
     const attempt: Attempt = { answer: result.log, move: null, error: null };
     turn.attempts.push(attempt);
+    // the evaluation of the best line, from the engine's side; a mate counts as decisive
+    const cp = !result.score ? null : 'mate' in result.score ? Math.sign(result.score.mate) * 100_000 : result.score.cp;
+
+    if (this.drawOffered() && cp !== null && cp <= ENGINE_DRAW_CP) {
+      attempt.move = 'accept-draw';
+      turn.drawAccepted = true;
+      turn.reason = `${engineReason(result, COLOR_NAME[color])} No advantage to play for, so it accepts the draw.`;
+      this.finish(null, 'agreement', this.drawAcceptedText(color), turn.reason);
+      return;
+    }
+
     const { uci } = result;
     try {
       attempt.move = this.chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san;
@@ -336,11 +411,21 @@ export class Game {
       attempt.error = `"${uci}" is not a legal move`;
       throw new GameError(`${engine.name} played an illegal move: ${uci}`, 500);
     }
-    const reason = engineReason(result, COLOR_NAME[color]);
+    let reason = engineReason(result, COLOR_NAME[color]);
+    if (cp !== null && Math.abs(cp) <= ENGINE_DRAW_CP && this.canOfferDraw(color, turn.ply)) {
+      this.drawOffers.push(turn.ply);
+      turn.drawOffered = true;
+      reason += ' The position is equal, so it offers a draw.';
+    }
     turn.move = attempt.move;
     turn.reason = reason;
     this.reasons[turn.ply] = reason;
     this.checkGameOver();
+  }
+
+  drawAcceptedText(color: Color): string {
+    if (this.mode === 'human') return `${this.nameOf(color)} accepts your draw offer. Draw agreed.`;
+    return `${this.labelOf(color)} accepts the draw offer. Draw agreed.`;
   }
 
   /** Play the candidate move if it is legal. */
@@ -379,6 +464,20 @@ export class Game {
     ];
     if (this.chess.inCheck()) lines.push('', 'You are in CHECK.');
     if (llm.showLegalMoves) lines.push('', `Legal moves: ${this.chess.moves().join(', ')}`);
+    if (this.drawOffered()) {
+      lines.push(
+        '',
+        'Your opponent offers a draw. To accept it, answer "MOVE: accept-draw" (with the REASON line); the game ends as a draw.',
+        'To decline, simply play a move.',
+      );
+    }
+    if (this.canOfferDraw(color, history.length)) {
+      lines.push(
+        '',
+        'You may offer a draw together with your move: add the line "DRAW: offer" before the REASON line.',
+        'Offer one only if you believe the position is a draw with best play; your opponent may decline and the game goes on.',
+      );
+    }
     lines.push('', 'Choose your move. End your answer with the "REASON: ..." and "MOVE: ..." lines.');
     return lines.join('\n');
   }
@@ -424,6 +523,8 @@ export class Game {
     this.chess.setHeader('Result', winner === 'w' ? '1-0' : winner === 'b' ? '0-1' : '1/2-1/2');
     if (winner && (reason === 'resignation' || reason === 'forfeit')) {
       this.chess.setHeader('Termination', `${this.nameOf(OTHER[winner])} ${reason === 'forfeit' ? 'forfeits' : 'resigns'}`);
+    } else if (reason === 'agreement') {
+      this.chess.setHeader('Termination', 'Draw by agreement');
     }
   }
 
@@ -441,6 +542,7 @@ export class Game {
       players: { w: playerInfo(this.players.w), b: playerInfo(this.players.b) },
       pgn: this.chess.pgn(),
       reasons: this.reasons,
+      drawOffers: this.drawOffers,
       result: this.result,
       llmTurns: this.llmTurns,
       lastError: this.lastError,
@@ -457,6 +559,7 @@ export class Game {
     game.createdAt = data.createdAt;
     game.touchedAt = data.touchedAt;
     game.reasons = data.reasons ?? [];
+    game.drawOffers = data.drawOffers ?? [];
     game.result = data.result;
     game.llmTurns = data.llmTurns ?? [];
     game.lastError = data.lastError;
@@ -494,6 +597,7 @@ export class Game {
         uci: m.lan,
         fen: m.after, // position after the move, for the in-browser engine
         reason: this.reasons[i] ?? null,
+        drawOffer: this.drawOffers.includes(i),
       })),
       lastMove: last ? { from: last.from, to: last.to } : null,
       checkSquare: c.inCheck() ? kingSquare(c, c.turn()) : null,
@@ -501,6 +605,8 @@ export class Game {
         ? c.moves({ verbose: true }).map((m) => ({ from: m.from, to: m.to, promotion: m.promotion ?? null, san: m.san }))
         : [],
       pgn: c.pgn(),
+      drawOffered: this.drawOffered(), // the side to move has a draw offer to answer
+      canOfferDraw: humanToMove && this.canOfferDraw(c.turn(), history.length),
       thinking: this.thinking,
       lastError: this.lastError,
       paused: this.paused,
@@ -510,9 +616,13 @@ export class Game {
   }
 }
 
-/** Split a free-form answer into the move (last "MOVE: x") and the reason (last "REASON: ..."). */
-export function parseAnswer(answer: string): { move: string | null; reason: string | null } {
-  return { move: extractMove(answer), reason: extractReason(answer) };
+/** Split a free-form answer into the move (last "MOVE: x"), the reason (last "REASON: ...") and a "DRAW: offer" line. */
+export function parseAnswer(answer: string): { move: string | null; reason: string | null; offersDraw: boolean } {
+  return {
+    move: extractMove(answer),
+    reason: extractReason(answer),
+    offersDraw: /^[\s*_#>-]*DRAW\s*[:=-]\s*[*_`"']*\s*offer/im.test(answer),
+  };
 }
 
 export function extractMove(answer: string): string | null {
@@ -532,7 +642,7 @@ export function extractMove(answer: string): string | null {
 }
 
 export function extractReason(answer: string): string | null {
-  const matches = [...answer.matchAll(/^[\s*_#>-]*REASON\s*[:=-]\s*([\s\S]*?)(?=^[\s*_#>-]*MOVE\s*[:=-]|$(?![\s\S]))/gim)];
+  const matches = [...answer.matchAll(/^[\s*_#>-]*REASON\s*[:=-]\s*([\s\S]*?)(?=^[\s*_#>-]*(?:MOVE|DRAW)\s*[:=-]|$(?![\s\S]))/gim)];
   if (!matches.length) return null;
   const reason = (matches.at(-1)?.[1] ?? '')
     .replace(/[*_`]+/g, '')

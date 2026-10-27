@@ -98,6 +98,11 @@
         <div id="status-text" class="status-text"></div>
       </div>
 
+      <div id="draw-offer" class="draw-offer" hidden>
+        <span id="draw-offer-text"></span>
+        <button id="accept-draw-btn" class="btn btn-primary">Accept draw</button>
+      </div>
+
       <div id="reason-callout" class="reason-callout" hidden></div>
 
       <div id="engine-panel" class="engine-panel" hidden></div>
@@ -120,6 +125,7 @@
         <button id="reasons-btn" class="btn btn-ghost" title="Show the LLM's reason for each move">💬 Reasons</button>
         <button id="pause-btn" class="btn btn-ghost" title="Pause / resume">⏸ Pause</button>
         <button id="step-btn" class="btn btn-ghost" title="Play the next move (→)">⏭ Step</button>
+        <button id="draw-btn" class="btn btn-ghost" title="Offer a draw together with your next move">½ Offer draw</button>
         <button id="resign-btn" class="btn btn-ghost btn-danger" title="Resign">⚑ Resign</button>
         <button id="new-btn" class="btn btn-primary">New game</button>
       </div>

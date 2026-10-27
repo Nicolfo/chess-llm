@@ -41,6 +41,7 @@ const state = {
   showReasons: load('reasons', false), // vs-human games; always on when watching
   showEngine: load('engine', true), // eval bar etc.: live when watching, after the game when playing
   analysisRequested: new Set(), // FENs already sent to the engine for the current game
+  offerDraw: false, // vs-human: offer a draw together with the next move
 };
 
 const engine = new Engine();
@@ -192,6 +193,7 @@ function resetGameState(game) {
   state.resultShownFor = null;
   state.logOpen.clear();
   state.logSignature = '';
+  state.offerDraw = false;
   engine.clearQueue();
   state.analysisRequested.clear();
   $('#result-modal').hidden = true;
@@ -463,6 +465,9 @@ async function submitMove(from, to, promotion, { dragged }) {
   game.legalMoves = [];
   game.checkSquare = null;
   game.turn = other(game.turn);
+  game.drawOffered = false; // moving declines an offer
+  const offerDraw = state.offerDraw;
+  state.offerDraw = false;
   state.selected = null;
   state.animatedKey = `${ply}:${from}${to}`;
   renderGame();
@@ -470,7 +475,7 @@ async function submitMove(from, to, promotion, { dragged }) {
   playSound(captured ? 'capture' : 'move');
 
   try {
-    sync(await api('POST', `/api/games/${game.id}/move`, { from, to, promotion }));
+    sync(await api('POST', `/api/games/${game.id}/move`, { from, to, promotion, offerDraw }));
   } catch (err) {
     toast(err.message);
     api('GET', `/api/games/${game.id}`).then(sync, () => {});
@@ -508,6 +513,16 @@ function renderGame() {
   $('#engine-btn').classList.toggle('active', state.showEngine);
   $('#resign-btn').hidden = isWatch(g);
   $('#resign-btn').disabled = !!g.result;
+  if (!g.canOfferDraw) state.offerDraw = false;
+  $('#draw-btn').hidden = isWatch(g);
+  $('#draw-btn').disabled = !g.canOfferDraw;
+  $('#draw-btn').classList.toggle('active', state.offerDraw);
+  $('#draw-btn').textContent = state.offerDraw ? '½ Offering draw…' : '½ Offer draw';
+  $('#draw-btn').title = g.canOfferDraw
+    ? 'Offer a draw together with your next move'
+    : 'Draw offers are possible on your turn from move 30, once every 10 moves';
+  $('#draw-offer').hidden = !(g.drawOffered && isPlayerTurn(g));
+  $('#draw-offer-text').textContent = `${label(g, other(g.turn))} offers a draw. Accept, or play a move to decline.`;
   $('#reasons-btn').hidden = isWatch(g);
   $('#reasons-btn').classList.toggle('active', state.showReasons);
   $('#pause-btn').hidden = !isWatch(g);
@@ -626,16 +641,20 @@ function moveLabel(ply) {
   return `${Math.floor(ply / 2) + 1}${ply % 2 ? '…' : '.'}`;
 }
 
-/** The latest LLM decision (move or resignation) with its reason. */
+/** The latest LLM decision (move, resignation or accepted draw) with its reason. */
 function renderReasonCallout() {
   const g = state.game;
   const el = $('#reason-callout');
-  const turn = [...g.llmTurns].reverse().find((t) => t.move || t.resigned);
+  const turn = [...g.llmTurns].reverse().find((t) => t.move || t.resigned || t.drawAccepted);
   if (!reasonsVisible(g) || !turn) {
     el.hidden = true;
     return;
   }
-  const what = turn.resigned ? 'resigns' : `${moveLabel(turn.ply)} <span class="san">${esc(turn.move)}</span>`;
+  const what = turn.resigned
+    ? 'resigns'
+    : turn.drawAccepted
+      ? 'accepts the draw'
+      : `${moveLabel(turn.ply)} <span class="san">${esc(turn.move)}</span>${turn.drawOffered ? ' and offers a draw' : ''}`;
   el.innerHTML = `${avatarHtml(g, turn.color)}
     <div><div class="who">${esc(label(g, turn.color))} ${what}</div>
     <div class="text ${turn.reason ? '' : 'none'}">${esc(turn.reason ?? 'No reason given.')}</div></div>`;
@@ -647,7 +666,8 @@ function renderMoves() {
   const list = $('#move-list');
   const last = g.history.length - 1;
   const withReasons = reasonsVisible(g);
-  const tag = (i) => (engineVisible(g) ? classBadge(g, i) : '');
+  // "(=)" marks a move that came with a draw offer, as in printed scores
+  const tag = (i) => (g.history[i].drawOffer ? ' (=)' : '') + (engineVisible(g) ? classBadge(g, i) : '');
   list.classList.toggle('with-reasons', withReasons);
 
   if (withReasons) {
@@ -689,16 +709,20 @@ function renderLog() {
     const who = isWatch(g) ? ` · ${esc(label(g, turn.color))}` : '';
     const status = turn.resigned
       ? '<span class="bad">⚑ resigned</span>'
-      : turn.move
-        ? `<span class="ok">✓ ${esc(turn.move)}</span>`
-        : turn.error
-          ? '<span class="bad">✗ failed</span>'
-          : '<span class="muted">thinking…</span>';
+      : turn.drawAccepted
+        ? '<span class="ok">½ accepted the draw</span>'
+        : turn.move
+          ? `<span class="ok">✓ ${esc(turn.move)}${turn.drawOffered ? ' (=) offers a draw' : ''}</span>`
+          : turn.error
+            ? '<span class="bad">✗ failed</span>'
+            : '<span class="muted">thinking…</span>';
     const attempts = turn.attempts
       .map((a, ai) => {
         const key = `${ti}:${ai}`;
         const head = a.move
-          ? `<span class="accept">Attempt ${ai + 1}: ${a.move === 'resign' ? 'resigned' : `played ${esc(a.move)}`}</span>`
+          ? `<span class="accept">Attempt ${ai + 1}: ${
+              a.move === 'resign' ? 'resigned' : a.move === 'accept-draw' ? 'accepted the draw' : `played ${esc(a.move)}`
+            }</span>`
           : `<span class="reject">Attempt ${ai + 1}: rejected — ${esc(a.error)}</span>`;
         // Raw answers contain the reasoning, so they follow the reasons toggle.
         return showAnswers
@@ -1124,6 +1148,20 @@ $('#pgn-btn').addEventListener('click', async () => {
     toast('PGN copied to clipboard');
   } catch {
     toast('Could not access the clipboard');
+  }
+});
+
+$('#draw-btn').addEventListener('click', () => {
+  state.offerDraw = !state.offerDraw;
+  renderGame();
+  if (state.offerDraw) toast('Your draw offer goes with your next move');
+});
+
+$('#accept-draw-btn').addEventListener('click', async () => {
+  try {
+    sync(await api('POST', `/api/games/${state.game.id}/accept-draw`));
+  } catch (err) {
+    toast(err.message);
   }
 });
 

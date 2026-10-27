@@ -92,8 +92,8 @@ app.get('/api/games/:id', (req, res) => {
 
 app.post('/api/games/:id/move', (req, res) => {
   const game = getGame(req.params.id);
-  const { from, to, promotion } = req.body ?? {};
-  game.playerMove({ from, to, promotion });
+  const { from, to, promotion, offerDraw } = req.body ?? {};
+  game.playerMove({ from, to, promotion, offerDraw: offerDraw === true });
   store.save(game);
   res.json(game);
 });
@@ -112,6 +112,13 @@ app.post('/api/games/:id/llm-move', async (req, res) => {
 app.post('/api/games/:id/pause', (req, res) => {
   const game = getGame(req.params.id);
   game.setPaused(req.body?.paused);
+  store.save(game);
+  res.json(game);
+});
+
+app.post('/api/games/:id/accept-draw', (req, res) => {
+  const game = getGame(req.params.id);
+  game.acceptDraw();
   store.save(game);
   res.json(game);
 });

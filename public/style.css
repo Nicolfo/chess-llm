@@ -576,6 +576,18 @@ body {
 
 .btn.active { color: var(--green); }
 
+.draw-offer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #3a3426;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+.draw-offer span { flex: 1; }
+.draw-offer[hidden] { display: none; }
+
 .reason-callout {
   display: flex;
   gap: 10px;

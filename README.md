@@ -9,6 +9,7 @@ A chess.com-style web app where you play chess against large language models, or
 - **Play vs LLM**: pick an opponent and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
 - **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time (a paused game stays paused when you reopen it); while paused, ⏭ Step (or the → key) plays one move at a time.
 - **LLM vs engine**: Stockfish appears in the same lists as the LLMs, at several strengths (about 1350 to 2500 Elo, plus full strength). Pick it for one side to see how an LLM holds up against a known level, or play against it yourself. It runs on the server, needs no API key and costs nothing.
+- **Draw offers**: from move 30, each side may offer a draw once every 10 moves: LLMs with a `DRAW: offer` line, Stockfish when the position is equal, you with the ½ Offer draw button (the offer goes with your next move). The opponent accepts, or declines by playing a move. Moves that came with an offer are marked `(=)`.
 - **Engine analysis** (📈 Engine): a Stockfish eval bar, the engine's best line, and every move labelled Best / Excellent / Good / Inaccuracy / Mistake / Blunder with an accuracy score per side, like chess.com's game review. Live in LLM vs LLM; against an LLM it appears once the game is over. Stockfish runs in your browser, so it costs nothing and needs no setup.
 - **Fast mode** (⚡ checkbox under each model pick): the model thinks little or not at all, so moves take seconds instead of minutes, at the cost of weaker play. Thinking is turned off where the provider allows it (DeepSeek, Kimi, Gemini 4 Argon), otherwise set to the lowest effort (Claude, GPT, Gemini 3.8 Flash).
 
@@ -286,7 +287,9 @@ Endpoints used in `config.example.json` (everything except Anthropic goes throug
 1. You move (drag & drop or click-click). The server validates it with [chess.js](https://github.com/jhlywa/chess.js).
 2. The server asks the LLM for its move, sending the FEN, an ASCII board, the PGN move history and your last move.
    The LLM must end its answer with `REASON: <why>` and `MOVE: <move>` (SAN like `Nf3`, `O-O`, `e8=Q`, or UCI like `e2e4`).
-   It may resign with `MOVE: resign` when its position is hopeless.
+   It may resign with `MOVE: resign` when its position is hopeless. From move 30 the prompt also lets it offer a draw
+   with a `DRAW: offer` line (at most once every 10 moves), and when the opponent has offered one it may accept with `MOVE: accept-draw`;
+   playing a move declines.
 3. The answer is parsed and validated. If there's no move or it's illegal, the server replies in the same
    conversation that the last answer was incorrect, quoting it and giving the reason, and asks again.
 4. After `maxAttempts` bad answers the LLM forfeits. Network / API errors don't count: the turn stays with the LLM and the UI offers a Retry button.
@@ -350,7 +353,7 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 Trace structure (one trace per LLM move, one session per game):
 
 ```
-choose-move        agent      input: side, move number, opponent's last move, FEN · output: move + reason (or resigned / forfeit)
+choose-move        agent      input: side, move number, opponent's last move, FEN, pending draw offer · output: move + reason, drawOffered (or resigned / acceptedDraw / forfeit)
 ├─ generate-move   generation full prompt, answer, reasoning, model, token usage, attempt number
 ├─ validate-move   guardrail  parsed move -> legal / rejected (WARNING with the reason)
 └─ ...             one generate/validate pair per retry
@@ -388,7 +391,8 @@ REST API:
 | GET | `/api/llms` | |
 | POST | `/api/games` | `{mode: "human", llmId, color: "white"\|"black"\|"random"}` or `{mode: "watch", whiteLlmId, blackLlmId}`. An id ending in `:fast` picks that model in Fast mode |
 | GET | `/api/games/:id` | |
-| POST | `/api/games/:id/move` | `{from, to, promotion?}` |
+| POST | `/api/games/:id/move` | `{from, to, promotion?, offerDraw?}` |
+| POST | `/api/games/:id/accept-draw` | (accepts the LLM's pending draw offer) |
 | POST | `/api/games/:id/llm-move` | |
 | POST | `/api/games/:id/pause` | `{paused: true}` or `{paused: false}` (LLM vs LLM only) |
 | POST | `/api/games/:id/resign` | |
