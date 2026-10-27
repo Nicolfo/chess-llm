@@ -1,14 +1,81 @@
 import crypto from 'node:crypto';
-import { Chess } from 'chess.js';
-import { propagateAttributes, startActiveObservation, startObservation } from '@langfuse/tracing';
-import { resolveLlm } from './config.js';
-import { chat } from './llm.js';
+import { Chess, type Color, type Square } from 'chess.js';
+import { type LangfuseAgent, propagateAttributes, startActiveObservation, startObservation } from '@langfuse/tracing';
+import { type Config, type Llm, resolveLlm } from './config.ts';
+import { type ChatMessage, chat } from './llm.ts';
 
-const COLOR_NAME = { w: 'White', b: 'Black' };
-const OTHER = { w: 'b', b: 'w' };
+const COLOR_NAME: Record<Color, string> = { w: 'White', b: 'Black' };
+const OTHER: Record<Color, Color> = { w: 'b', b: 'w' };
 const MAX_REASON_LENGTH = 500;
 
-function systemPrompt(opponent) {
+/** What is shown and saved about a player; never the API key or URL. */
+interface PlayerInfo {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  icon: string;
+}
+
+/** A saved game's LLM that is no longer in the config: its name still shows, but it can't move. */
+interface MissingLlm extends PlayerInfo {
+  missing: true;
+}
+
+/** An LLM side; null is the human player. */
+type Player = Llm | MissingLlm | null;
+
+export interface GameResult {
+  winner: Color | null; // null: draw
+  reason: string;
+  text: string;
+  detail: string | null;
+}
+
+interface Attempt {
+  answer: string;
+  move: string | null;
+  error: string | null;
+}
+
+export interface LlmTurn {
+  ply: number;
+  color: Color;
+  llm: string;
+  attempts: Attempt[];
+  move: string | null;
+  reason: string | null;
+  resigned: boolean;
+  error: string | null;
+}
+
+/** A game as stored on disk (see GameStore). */
+export interface SavedGame {
+  version: 1;
+  id: string;
+  createdAt: number;
+  touchedAt: number;
+  players: Record<Color, PlayerInfo | null>;
+  pgn: string;
+  reasons: (string | null)[];
+  result: GameResult | null;
+  llmTurns: LlmTurn[];
+  lastError: string | null;
+  paused: boolean;
+}
+
+interface GameOptions {
+  white: Player;
+  black: Player;
+  maxAttempts: number;
+  requestTimeoutMs: number;
+  id?: string;
+}
+
+const playerInfo = (llm: Player): PlayerInfo | null =>
+  llm && { id: llm.id, name: llm.name, provider: llm.provider, model: llm.model, icon: llm.icon };
+
+function systemPrompt(opponent: string): string {
   return `You are a strong chess player taking part in a game against ${opponent}.
 On every turn you receive the current position and your opponent's last move, and you must choose your next move.
 
@@ -26,17 +93,35 @@ MOVE: <move>
 }
 
 export class GameError extends Error {
-  constructor(message, status = 400) {
+  readonly status: number;
+
+  constructor(message: string, status = 400) {
     super(message);
     this.status = status;
   }
 }
 
 export class Game {
+  readonly id: string;
+  createdAt: number;
+  touchedAt: number;
+  readonly players: Record<Color, Player>;
+  readonly mode: 'watch' | 'human';
+  readonly playerColor: Color | null;
+  readonly maxAttempts: number;
+  readonly requestTimeoutMs: number;
+  readonly chess: Chess;
+  reasons: (string | null)[];
+  result: GameResult | null;
+  thinking: boolean;
+  llmTurns: LlmTurn[];
+  lastError: string | null;
+  paused: boolean;
+
   /**
    * @param white / black  an LLM entry from config.llms, or null for the human player
    */
-  constructor({ white, black, maxAttempts, requestTimeoutMs, id = crypto.randomUUID() }) {
+  constructor({ white, black, maxAttempts, requestTimeoutMs, id = crypto.randomUUID() }: GameOptions) {
     if (!white && !black) throw new GameError('At least one side must be an LLM');
     this.id = id;
     this.createdAt = Date.now();
@@ -59,25 +144,25 @@ export class Game {
     this.touchedAt = Date.now();
   }
 
-  get isOver() {
+  get isOver(): boolean {
     return this.result !== null;
   }
 
-  nameOf(color) {
+  nameOf(color: Color): string {
     return this.players[color]?.name ?? 'You';
   }
 
   /** "You", "Claude", or "Claude (White)" when watching (both sides may be the same model). */
-  labelOf(color) {
+  labelOf(color: Color): string {
     return this.mode === 'watch' ? `${this.nameOf(color)} (${COLOR_NAME[color]})` : this.nameOf(color);
   }
 
-  winText(winner) {
+  winText(winner: Color): string {
     if (this.mode === 'human') return winner === this.playerColor ? 'You win!' : `${this.nameOf(winner)} wins.`;
     return `${this.labelOf(winner)} wins.`;
   }
 
-  playerMove({ from, to, promotion }) {
+  playerMove({ from, to, promotion }: { from: string; to: string; promotion?: string }): void {
     this.touch();
     if (this.isOver) throw new GameError('Game is over');
     if (this.mode !== 'human' || this.chess.turn() !== this.playerColor) throw new GameError('It is not your turn');
@@ -90,16 +175,16 @@ export class Game {
   }
 
   /** Pause or resume an LLM vs LLM game. A move already being thought about still completes. */
-  setPaused(paused) {
+  setPaused(paused: unknown): void {
     this.touch();
     if (this.mode !== 'watch') throw new GameError('Only LLM vs LLM games can be paused');
     this.paused = !!paused;
   }
 
-  resign() {
+  resign(): void {
     this.touch();
     if (this.isOver) throw new GameError('Game is over');
-    if (this.mode !== 'human') throw new GameError('Only a human player can resign here');
+    if (this.mode !== 'human' || !this.playerColor) throw new GameError('Only a human player can resign here');
     const winner = OTHER[this.playerColor];
     this.finish(winner, 'resignation', `You resigned. ${this.nameOf(winner)} wins.`);
   }
@@ -109,13 +194,13 @@ export class Game {
    * (with the rejected answer and the reason) until it plays a legal move, resigns,
    * or runs out of attempts, in which case it forfeits.
    */
-  async llmMove() {
+  async llmMove(): Promise<void> {
     this.touch();
     if (this.isOver) throw new GameError('Game is over');
     const color = this.chess.turn();
     const llm = this.players[color];
     if (!llm) throw new GameError("It is not an LLM's turn");
-    if (llm.missing) {
+    if ('missing' in llm) {
       // shown like a provider error (with Retry), so the client doesn't keep asking
       this.lastError = `${llm.name} is no longer in the server's config, so this game can't continue`;
       throw new GameError(this.lastError, 422);
@@ -125,7 +210,7 @@ export class Game {
     this.thinking = true;
     this.lastError = null;
     const ply = this.chess.history().length;
-    const turn = { ply, color, llm: llm.name, attempts: [], move: null, reason: null, resigned: false, error: null };
+    const turn: LlmTurn = { ply, color, llm: llm.name, attempts: [], move: null, reason: null, resigned: false, error: null };
     this.llmTurns.push(turn);
 
     try {
@@ -139,8 +224,8 @@ export class Game {
         () => startActiveObservation('choose-move', (agent) => this.playTurn(agent, turn, llm, color), { asType: 'agent' }),
       );
     } catch (err) {
-      turn.error = err.message;
-      this.lastError = err.message;
+      turn.error = (err as Error).message;
+      this.lastError = turn.error;
       // Drop the turn entry if nothing was attempted, so a retry starts clean.
       if (turn.attempts.length === 0) this.llmTurns.pop();
       throw err;
@@ -149,7 +234,7 @@ export class Game {
     }
   }
 
-  async playTurn(agent, turn, llm, color) {
+  async playTurn(agent: LangfuseAgent, turn: LlmTurn, llm: Llm, color: Color): Promise<void> {
     const last = this.chess.history({ verbose: true }).at(-1);
     agent.update({
       input: {
@@ -160,7 +245,7 @@ export class Game {
       },
     });
     const opponent = this.players[OTHER[color]] ? 'another AI model' : 'a human';
-    const messages = [{ role: 'user', content: this.buildPrompt(color) }];
+    const messages: ChatMessage[] = [{ role: 'user', content: this.buildPrompt(color, llm) }];
 
     try {
       while (turn.attempts.length < this.maxAttempts) {
@@ -170,7 +255,7 @@ export class Game {
           name: 'generate-move',
           metadata: { attempt: turn.attempts.length + 1 },
         });
-        const attempt = { answer, move: null, error: null };
+        const attempt: Attempt = { answer, move: null, error: null };
         turn.attempts.push(attempt);
         const { move, reason } = parseAnswer(answer);
 
@@ -203,9 +288,9 @@ export class Game {
           return;
         }
 
-        attempt.error = error;
+        attempt.error = error ?? null;
         messages.push({ role: 'assistant', content: answer });
-        messages.push({ role: 'user', content: this.buildRetryPrompt(answer, error, turn.attempts.length) });
+        messages.push({ role: 'user', content: this.buildRetryPrompt(answer, error ?? '', turn.attempts.length, llm) });
       }
 
       turn.error = `No legal move after ${this.maxAttempts} attempts`;
@@ -222,13 +307,13 @@ export class Game {
         metadata: { attempts: turn.attempts.length },
       });
     } catch (err) {
-      agent.update({ level: 'ERROR', statusMessage: err.message, metadata: { attempts: turn.attempts.length } });
+      agent.update({ level: 'ERROR', statusMessage: (err as Error).message, metadata: { attempts: turn.attempts.length } });
       throw err;
     }
   }
 
   /** Play the candidate move if it is legal. */
-  tryApply(candidate, color) {
+  tryApply(candidate: string | null, color: Color): { san?: string; error?: string } {
     if (!candidate) {
       return { error: 'Could not find a move in your answer. The last line must be "MOVE: <move>".' };
     }
@@ -243,7 +328,7 @@ export class Game {
     }
   }
 
-  buildPrompt(color) {
+  buildPrompt(color: Color, llm: Llm): string {
     const history = this.chess.history({ verbose: true });
     const last = history.at(-1);
     const moveNumber = Math.floor(history.length / 2) + 1;
@@ -262,12 +347,12 @@ export class Game {
       `Move history (PGN): ${pgnMoves(this.chess) || '(none)'}`,
     ];
     if (this.chess.inCheck()) lines.push('', 'You are in CHECK.');
-    if (this.players[color].showLegalMoves) lines.push('', `Legal moves: ${this.chess.moves().join(', ')}`);
+    if (llm.showLegalMoves) lines.push('', `Legal moves: ${this.chess.moves().join(', ')}`);
     lines.push('', 'Choose your move. End your answer with the "REASON: ..." and "MOVE: ..." lines.');
     return lines.join('\n');
   }
 
-  buildRetryPrompt(answer, error, attemptNo) {
+  buildRetryPrompt(answer: string, error: string, attemptNo: number, llm: Llm): string {
     const quoted = answer.length > 600 ? `...${answer.slice(-600)}` : answer;
     const lines = [
       `Your last answer was incorrect (attempt ${attemptNo} of ${this.maxAttempts}).`,
@@ -282,12 +367,12 @@ export class Game {
       `The position has NOT changed. Current position (FEN): ${this.chess.fen()}`,
       boardDiagram(this.chess),
     ];
-    if (this.players[this.chess.turn()].showLegalMoves) lines.push('', `Legal moves: ${this.chess.moves().join(', ')}`);
+    if (llm.showLegalMoves) lines.push('', `Legal moves: ${this.chess.moves().join(', ')}`);
     lines.push('', 'Try again with a legal move. End your answer with the "REASON: ..." and "MOVE: ..." lines.');
     return lines.join('\n');
   }
 
-  checkGameOver() {
+  checkGameOver(): void {
     const c = this.chess;
     if (c.isCheckmate()) {
       const winner = OTHER[c.turn()];
@@ -303,27 +388,26 @@ export class Game {
     }
   }
 
-  finish(winner, reason, text, detail = null) {
+  finish(winner: Color | null, reason: string, text: string, detail: string | null = null): void {
     this.result = { winner, reason, text, detail };
     this.chess.setHeader('Result', winner === 'w' ? '1-0' : winner === 'b' ? '0-1' : '1/2-1/2');
-    if (reason === 'resignation' || reason === 'forfeit') {
+    if (winner && (reason === 'resignation' || reason === 'forfeit')) {
       this.chess.setHeader('Termination', `${this.nameOf(OTHER[winner])} ${reason === 'forfeit' ? 'forfeits' : 'resigns'}`);
     }
   }
 
-  touch() {
+  touch(): void {
     this.touchedAt = Date.now();
   }
 
   /** Everything needed to rebuild the game after a restart. API keys and URLs are never stored. */
-  serialize() {
-    const info = (llm) => llm && { id: llm.id, name: llm.name, provider: llm.provider, model: llm.model, icon: llm.icon };
+  serialize(): SavedGame {
     return {
       version: 1,
       id: this.id,
       createdAt: this.createdAt,
       touchedAt: this.touchedAt,
-      players: { w: info(this.players.w), b: info(this.players.b) },
+      players: { w: playerInfo(this.players.w), b: playerInfo(this.players.b) },
       pgn: this.chess.pgn(),
       reasons: this.reasons,
       result: this.result,
@@ -334,9 +418,9 @@ export class Game {
   }
 
   /** Rebuild a saved game. Players are looked up in the current config by id. */
-  static restore(data, { llms, maxAttempts, requestTimeoutMs }) {
+  static restore(data: SavedGame, { llms, maxAttempts, requestTimeoutMs }: Pick<Config, 'llms' | 'maxAttempts' | 'requestTimeoutMs'>): Game {
     // A model removed from the config keeps its name on screen but can't move any more.
-    const player = (saved) => saved && (resolveLlm(llms, saved.id) ?? { ...saved, missing: true });
+    const player = (saved: PlayerInfo | null): Player => saved && (resolveLlm(llms, saved.id) ?? { ...saved, missing: true });
     const game = new Game({ white: player(data.players.w), black: player(data.players.b), maxAttempts, requestTimeoutMs, id: data.id });
     game.chess.loadPgn(data.pgn);
     game.createdAt = data.createdAt;
@@ -362,11 +446,10 @@ export class Game {
     const history = c.history({ verbose: true });
     const last = history.at(-1);
     const humanToMove = this.mode === 'human' && !this.isOver && c.turn() === this.playerColor;
-    const info = (llm) => llm && { id: llm.id, name: llm.name, provider: llm.provider, model: llm.model, icon: llm.icon };
     return {
       id: this.id,
       mode: this.mode,
-      players: { w: info(this.players.w), b: info(this.players.b) },
+      players: { w: playerInfo(this.players.w), b: playerInfo(this.players.b) },
       playerColor: this.playerColor,
       fen: c.fen(),
       turn: c.turn(),
@@ -397,13 +480,13 @@ export class Game {
 }
 
 /** Split a free-form answer into the move (last "MOVE: x") and the reason (last "REASON: ..."). */
-export function parseAnswer(answer) {
+export function parseAnswer(answer: string): { move: string | null; reason: string | null } {
   return { move: extractMove(answer), reason: extractReason(answer) };
 }
 
-export function extractMove(answer) {
+export function extractMove(answer: string): string | null {
   const tagged = [...answer.matchAll(/^[\s*_#>-]*MOVE\s*[:=-]\s*[*_`"']*\s*([^\s*_`"']+)/gim)];
-  let token = tagged.length ? tagged.at(-1)[1] : null;
+  let token = tagged.at(-1)?.[1] ?? null;
   if (!token) {
     const bare = answer.trim().replace(/^[*_`"']+|[*_`"']+$/g, '');
     if (/^\S+$/.test(bare)) token = bare;
@@ -417,11 +500,10 @@ export function extractMove(answer) {
   return token || null;
 }
 
-export function extractReason(answer) {
+export function extractReason(answer: string): string | null {
   const matches = [...answer.matchAll(/^[\s*_#>-]*REASON\s*[:=-]\s*([\s\S]*?)(?=^[\s*_#>-]*MOVE\s*[:=-]|$(?![\s\S]))/gim)];
   if (!matches.length) return null;
-  const reason = matches
-    .at(-1)[1]
+  const reason = (matches.at(-1)?.[1] ?? '')
     .replace(/[*_`]+/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -429,7 +511,7 @@ export function extractReason(answer) {
   return reason.length > MAX_REASON_LENGTH ? `${reason.slice(0, MAX_REASON_LENGTH - 1)}…` : reason;
 }
 
-function boardDiagram(chess) {
+function boardDiagram(chess: Chess): string {
   const rows = chess.board().map((rank, i) => {
     const cells = rank.map((sq) => (sq ? (sq.color === 'w' ? sq.type.toUpperCase() : sq.type) : '.'));
     return `${8 - i} | ${cells.join(' ')}`;
@@ -437,16 +519,16 @@ function boardDiagram(chess) {
   return ['  +----------------', ...rows, '  +----------------', '    a b c d e f g h'].join('\n');
 }
 
-function pgnMoves(chess) {
+function pgnMoves(chess: Chess): string {
   const sans = chess.history();
-  const parts = [];
+  const parts: string[] = [];
   for (let i = 0; i < sans.length; i += 2) {
     parts.push(`${i / 2 + 1}. ${sans[i]}${sans[i + 1] ? ` ${sans[i + 1]}` : ''}`);
   }
   return parts.join(' ');
 }
 
-function kingSquare(chess, color) {
+function kingSquare(chess: Chess, color: Color): Square | null {
   for (const rank of chess.board()) {
     for (const sq of rank) {
       if (sq && sq.type === 'k' && sq.color === color) return sq.square;

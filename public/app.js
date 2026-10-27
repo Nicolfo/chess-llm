@@ -13,6 +13,8 @@ const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const PV_PLIES = 10; // length of the best line shown
 
 const $ = (sel) => document.querySelector(sel);
+/** @returns {NodeListOf<HTMLElement>} */
+const $$ = (sel) => document.querySelectorAll(sel);
 
 const state = {
   llms: [],
@@ -87,9 +89,7 @@ async function api(method, url, body) {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data.error ?? `HTTP ${res.status}`);
-    err.status = res.status;
-    throw err;
+    throw Object.assign(new Error(data.error ?? `HTTP ${res.status}`), { status: res.status });
   }
   return data;
 }
@@ -245,7 +245,7 @@ function llmCards(selectedId) {
 
 function renderLobby() {
   const watch = state.mode === 'watch';
-  document.querySelectorAll('.mode-tab').forEach((t) => t.classList.toggle('selected', t.dataset.mode === state.mode));
+  $$('.mode-tab').forEach((t) => t.classList.toggle('selected', t.dataset.mode === state.mode));
   $('#human-setup').hidden = watch;
   $('#watch-setup').hidden = !watch;
   if (watch) {
@@ -253,9 +253,9 @@ function renderLobby() {
     $('#black-list').innerHTML = llmCards(state.watchBlack);
   } else {
     $('#llm-list').innerHTML = llmCards(state.selectedLlm);
-    document.querySelectorAll('.color-btn').forEach((b) => b.classList.toggle('selected', b.dataset.color === state.selectedColor));
+    $$('.color-btn').forEach((b) => b.classList.toggle('selected', b.dataset.color === state.selectedColor));
   }
-  for (const toggle of document.querySelectorAll('.fast-toggle')) {
+  for (const toggle of $$('.fast-toggle')) {
     const key = toggle.dataset.for;
     toggle.hidden = !state.llms.find((l) => l.id === state[key])?.fastMode;
     toggle.querySelector('input').checked = state.fast[key];
@@ -270,7 +270,7 @@ function showLobbyError(msg) {
   el.hidden = !msg;
 }
 
-document.querySelectorAll('.mode-tab').forEach((tab) =>
+$$('.mode-tab').forEach((tab) =>
   tab.addEventListener('click', () => {
     state.mode = tab.dataset.mode;
     save('mode', state.mode);
@@ -304,14 +304,14 @@ $('#swap-btn').addEventListener('click', () => {
   renderLobby();
 });
 
-document.querySelectorAll('.fast-toggle input').forEach((input) =>
+/** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('.fast-toggle input')).forEach((input) =>
   input.addEventListener('change', () => {
-    state.fast[input.closest('.fast-toggle').dataset.for] = input.checked;
+    state.fast[input.parentElement.dataset.for] = input.checked;
     save('fast', state.fast);
   }),
 );
 
-document.querySelectorAll('.color-btn').forEach((btn) =>
+$$('.color-btn').forEach((btn) =>
   btn.addEventListener('click', () => {
     state.selectedColor = btn.dataset.color;
     save('color', state.selectedColor);
@@ -836,8 +836,9 @@ function renderEnginePanel(g, ev) {
 
 let ChessLib = null;
 let chessLibLoading = null;
+const CHESS_LIB_URL = '/vendor/chess.js'; // served by our server (see server.ts), not resolvable when type checking
 function loadChessLib() {
-  chessLibLoading ??= import('/vendor/chess.js').then((mod) => {
+  chessLibLoading ??= import(CHESS_LIB_URL).then((mod) => {
     ChessLib = mod;
     if (state.game) renderAnalysis();
   });
@@ -912,7 +913,9 @@ function summaryHtml(g) {
 // ---------------------------------------------------------------- board input
 
 function squareAt(x, y) {
-  return document.elementFromPoint(x, y)?.closest('#board .square')?.dataset.square ?? null;
+  /** @type {HTMLElement | null} */
+  const square = document.elementFromPoint(x, y)?.closest('#board .square');
+  return square?.dataset.square ?? null;
 }
 
 function pieceAt(sq) {
@@ -952,7 +955,8 @@ $('#board').addEventListener('pointerdown', (e) => {
   ghost.className = 'drag-ghost';
   ghost.style.width = ghost.style.height = `${size}px`;
   ghost.innerHTML = pieceSvg(piece);
-  ghost.firstChild.style.width = ghost.firstChild.style.height = '100%';
+  const svg = /** @type {SVGElement} */ (ghost.firstElementChild);
+  svg.style.width = svg.style.height = '100%';
   moveGhost(ghost, e.clientX, e.clientY);
   document.body.appendChild(ghost);
   $(`#board [data-square="${sq}"] .piece`)?.classList.add('dragging-source');

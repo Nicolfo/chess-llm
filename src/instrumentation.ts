@@ -19,7 +19,7 @@ const API_KEY_PATTERN = /\b(sk-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{10,}|pk-lf-[A
 
 export const tracingEnabled = Boolean(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
 
-let sdk = null;
+let sdk: NodeSDK | null = null;
 
 if (tracingEnabled) {
   sdk = new NodeSDK({

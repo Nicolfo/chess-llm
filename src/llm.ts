@@ -4,8 +4,74 @@
 // Every call is recorded as a Langfuse generation (a no-op when tracing is disabled).
 import { startActiveObservation } from '@langfuse/tracing';
 import { Agent, fetch } from 'undici';
+import type { JsonObject, Llm } from './config.ts';
 
 export class LlmError extends Error {}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+interface ChatOptions {
+  timeoutMs?: number;
+  name?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** Langfuse usage buckets, e.g. { input, output, output_reasoning_tokens }. */
+type Usage = Record<string, number>;
+
+interface ChatResult {
+  text: string;
+  reasoning: string;
+  model?: string;
+  usage?: Usage;
+  finishReason?: string | null;
+  budgetExceeded?: boolean;
+}
+
+// The parts of the provider responses that are used here.
+interface AnthropicUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+interface AnthropicResponse {
+  content?: { type: string; text?: string; thinking?: string }[];
+  model?: string;
+  stop_reason?: string;
+  usage?: AnthropicUsage;
+}
+interface OpenAiUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  prompt_cache_hit_tokens?: number; // DeepSeek
+  completion_tokens_details?: { reasoning_tokens?: number };
+}
+interface OpenAiMessage {
+  content?: string | { text?: string }[] | null;
+  reasoning_content?: string | null;
+  reasoning?: string | null;
+}
+interface OpenAiResponse {
+  model?: string;
+  choices?: { message?: OpenAiMessage; finish_reason?: string | null }[];
+  usage?: OpenAiUsage;
+}
+interface OpenAiChunk {
+  model?: string;
+  error?: { message?: string };
+  usage?: OpenAiUsage;
+  choices?: {
+    delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null };
+    finish_reason?: string | null;
+    usage?: OpenAiUsage; // Moonshot
+  }[];
+}
 
 // Non-streaming completions send no response headers until the whole answer (including
 // reasoning) is generated. undici's default 300 s headers/body timeouts would cut long
@@ -15,11 +81,16 @@ const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 /**
  * @param llm      entry from config.llms
  * @param system   system prompt
- * @param messages [{ role: 'user' | 'assistant', content: string }]
+ * @param messages the conversation so far
  * @param options  timeoutMs; name of the generation in the trace; metadata for it
  * @returns the assistant's text reply
  */
-export async function chat(llm, system, messages, { timeoutMs = 120_000, name = 'llm-call', metadata = {} } = {}) {
+export async function chat(
+  llm: Llm,
+  system: string,
+  messages: ChatMessage[],
+  { timeoutMs = 120_000, name = 'llm-call', metadata = {} }: ChatOptions = {},
+): Promise<string> {
   const signal = AbortSignal.timeout(timeoutMs);
   const result = await generate(llm, system, messages, signal, timeoutMs, name, metadata);
   if (!result.budgetExceeded) return result.text;
@@ -44,7 +115,7 @@ export async function chat(llm, system, messages, { timeoutMs = 120_000, name = 
   return followUp.text;
 }
 
-function budgetFollowUpPrompt(reasoning) {
+function budgetFollowUpPrompt(reasoning: string): string {
   return [
     'You ran out of thinking time for this move. This is your analysis so far:',
     '"""',
@@ -56,9 +127,17 @@ function budgetFollowUpPrompt(reasoning) {
 }
 
 /** One request to the provider, recorded as a Langfuse generation. */
-async function generate(llm, system, messages, signal, timeoutMs, name, metadata) {
+async function generate(
+  llm: Llm,
+  system: string,
+  messages: ChatMessage[],
+  signal: AbortSignal,
+  timeoutMs: number,
+  name: string,
+  metadata: Record<string, unknown>,
+): Promise<ChatResult> {
   const call = llm.provider === 'anthropic' ? anthropicChat : openaiChat;
-  const modelParameters = {};
+  const modelParameters: Record<string, string | number> = {};
   if (llm.maxTokens !== undefined || llm.provider === 'anthropic') modelParameters.max_tokens = llm.maxTokens ?? 4096;
   if (llm.temperature !== undefined) modelParameters.temperature = llm.temperature;
   for (const [key, value] of Object.entries(llm.extraBody)) {
@@ -87,7 +166,7 @@ async function generate(llm, system, messages, signal, timeoutMs, name, metadata
           metadata: { finishReason: result.finishReason },
           ...(result.budgetExceeded
             ? {
-                level: 'WARNING',
+                level: 'WARNING' as const,
                 statusMessage: `Thinking budget of ${llm.thinkingBudget} tokens used up: stopped, asking for the move without thinking`,
               }
             : {}),
@@ -103,16 +182,17 @@ async function generate(llm, system, messages, signal, timeoutMs, name, metadata
   );
 }
 
-function toLlmError(llm, err, timeoutMs) {
+function toLlmError(llm: Llm, err: unknown, timeoutMs: number): LlmError {
   if (err instanceof LlmError) return err;
-  if (err.name === 'TimeoutError') return new LlmError(`${llm.name}: request timed out after ${timeoutMs} ms`);
-  const code = err.cause?.code ? ` (${err.cause.code})` : '';
-  return new LlmError(`${llm.name}: ${err.message}${code}`);
+  const e = err as Error & { cause?: { code?: string } };
+  if (e.name === 'TimeoutError') return new LlmError(`${llm.name}: request timed out after ${timeoutMs} ms`);
+  const code = e.cause?.code ? ` (${e.cause.code})` : '';
+  return new LlmError(`${llm.name}: ${e.message}${code}`);
 }
 
-async function anthropicChat(llm, system, messages, signal) {
+async function anthropicChat(llm: Llm, system: string, messages: ChatMessage[], signal: AbortSignal): Promise<ChatResult> {
   const url = llm.baseUrl.endsWith('/v1') ? `${llm.baseUrl}/messages` : `${llm.baseUrl}/v1/messages`;
-  const body = {
+  const body: JsonObject = {
     model: llm.model,
     max_tokens: llm.maxTokens ?? 4096,
     system,
@@ -120,7 +200,7 @@ async function anthropicChat(llm, system, messages, signal) {
   };
   if (llm.temperature !== undefined) body.temperature = llm.temperature;
 
-  const data = await postJson(llm, url, body, {
+  const data = await postJson<AnthropicResponse>(llm, url, body, {
     'x-api-key': llm.apiKey,
     'anthropic-version': '2023-06-01',
   }, signal);
@@ -140,19 +220,19 @@ async function anthropicChat(llm, system, messages, signal) {
   return { text, reasoning, model: data.model, usage: anthropicUsage(data.usage), finishReason: data.stop_reason };
 }
 
-async function openaiChat(llm, system, messages, signal) {
+async function openaiChat(llm: Llm, system: string, messages: ChatMessage[], signal: AbortSignal): Promise<ChatResult> {
   const url = `${llm.baseUrl}/chat/completions`;
-  const body = {
+  const body: JsonObject = {
     model: llm.model,
     messages: [{ role: 'system', content: system }, ...messages],
   };
   if (llm.maxTokens !== undefined) body.max_completion_tokens = llm.maxTokens;
   if (llm.temperature !== undefined) body.temperature = llm.temperature;
 
-  const headers = {};
+  const headers: Record<string, string> = {};
   if (llm.apiKey) headers.authorization = `Bearer ${llm.apiKey}`;
-  if (llm.thinkingBudget) return openaiStreamChat(llm, url, body, headers, signal);
-  const data = await postJson(llm, url, body, headers, signal);
+  if (llm.thinkingBudget) return openaiStreamChat(llm, llm.thinkingBudget, url, body, headers, signal);
+  const data = await postJson<OpenAiResponse>(llm, url, body, headers, signal);
 
   const choice = data.choices?.[0];
   const message = choice?.message ?? {};
@@ -164,35 +244,43 @@ async function openaiChat(llm, system, messages, signal) {
   return { text, reasoning, model: data.model, usage: openaiUsage(data.usage), finishReason: choice?.finish_reason };
 }
 
-// Streams the answer so the thinking can be cut off once it passes llm.thinkingBudget tokens
+// Streams the answer so the thinking can be cut off once it passes `budget` tokens
 // (counted as streamed reasoning chunks, about one token each). A cut-off answer comes back
 // with budgetExceeded and the reasoning so far.
-async function openaiStreamChat(llm, url, body, headers, signal) {
-  const budget = new AbortController();
+async function openaiStreamChat(
+  llm: Llm,
+  budget: number,
+  url: string,
+  body: JsonObject,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<ChatResult> {
+  const stop = new AbortController();
   const res = await post(
     llm,
     url,
     { ...body, stream: true, stream_options: { include_usage: true } },
     headers,
-    AbortSignal.any([signal, budget.signal]),
+    AbortSignal.any([signal, stop.signal]),
   );
+  if (!res.body) throw new LlmError(`${llm.name}: empty response body`);
   const decoder = new TextDecoder();
   let pending = '';
   let text = '';
   let reasoning = '';
   let reasoningChunks = 0;
-  let usage;
-  let model;
-  let finishReason;
+  let usage: OpenAiUsage | undefined;
+  let model: string | undefined;
+  let finishReason: string | null | undefined;
   try {
     read: for await (const chunk of res.body) {
       pending += decoder.decode(chunk, { stream: true });
       const lines = pending.split('\n');
-      pending = lines.pop();
+      pending = lines.pop() ?? '';
       for (const line of lines) {
         const payload = line.startsWith('data:') ? line.slice(5).trim() : '';
         if (!payload || payload === '[DONE]') continue;
-        const data = JSON.parse(payload);
+        const data = JSON.parse(payload) as OpenAiChunk;
         if (data.error) throw new LlmError(`${llm.name}: ${data.error.message ?? JSON.stringify(data.error)}`);
         const choice = data.choices?.[0];
         const thought = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning ?? '';
@@ -204,14 +292,14 @@ async function openaiStreamChat(llm, url, body, headers, signal) {
         model ??= data.model;
         finishReason = choice?.finish_reason ?? finishReason;
         usage = data.usage ?? choice?.usage ?? usage; // Moonshot puts it on the choice
-        if (reasoningChunks > llm.thinkingBudget && !text.trim()) break read;
+        if (reasoningChunks > budget && !text.trim()) break read;
       }
     }
   } finally {
-    budget.abort(); // closes the connection when we stop early; a no-op once the stream ended
+    stop.abort(); // closes the connection when we stop early; a no-op once the stream ended
   }
 
-  if (reasoningChunks > llm.thinkingBudget && !text.trim()) {
+  if (reasoningChunks > budget && !text.trim()) {
     return {
       budgetExceeded: true,
       text: '',
@@ -229,7 +317,7 @@ async function openaiStreamChat(llm, url, body, headers, signal) {
 // Langfuse usage buckets are mutually exclusive: `input` must not include cached tokens
 // and `output` must not include reasoning tokens.
 
-function anthropicUsage(u) {
+function anthropicUsage(u: AnthropicUsage | undefined): Usage | undefined {
   if (!u) return undefined;
   // Anthropic's input_tokens already excludes cache reads/writes.
   return compact({
@@ -240,7 +328,7 @@ function anthropicUsage(u) {
   });
 }
 
-function openaiUsage(u) {
+function openaiUsage(u: OpenAiUsage | undefined): Usage | undefined {
   if (!u) return undefined;
   // OpenAI-style counts are inclusive. DeepSeek reports cache hits as prompt_cache_hit_tokens.
   const cached = u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens ?? 0;
@@ -261,23 +349,23 @@ function openaiUsage(u) {
   });
 }
 
-function compact(obj) {
-  const out = Object.fromEntries(Object.entries(obj).filter(([, v]) => typeof v === 'number'));
+function compact(obj: Record<string, number | undefined>): Usage | undefined {
+  const out = Object.fromEntries(Object.entries(obj).filter(([, v]) => typeof v === 'number')) as Usage;
   return Object.keys(out).length ? out : undefined;
 }
 
-async function postJson(llm, url, body, headers, signal) {
+async function postJson<T>(llm: Llm, url: string, body: JsonObject, headers: Record<string, string>, signal: AbortSignal): Promise<T> {
   const res = await post(llm, url, body, headers, signal);
   const raw = await res.text();
   try {
-    return JSON.parse(raw);
+    return JSON.parse(raw) as T;
   } catch {
     throw new LlmError(`${llm.name}: HTTP ${res.status}, non-JSON response: ${raw.slice(0, 300)}`);
   }
 }
 
 /** POSTs the request; throws LlmError on an HTTP error status. */
-async function post(llm, url, body, headers, signal) {
+async function post(llm: Llm, url: string, body: JsonObject, headers: Record<string, string>, signal: AbortSignal) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers, ...llm.headers },
@@ -287,7 +375,7 @@ async function post(llm, url, body, headers, signal) {
   });
   if (res.ok) return res;
   const raw = await res.text();
-  let data;
+  let data: { error?: { message?: string }; message?: string };
   try {
     data = JSON.parse(raw);
   } catch {

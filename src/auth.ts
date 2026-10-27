@@ -11,12 +11,18 @@ const MAX_FAILURES = 10; // per IP and window, then 429
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const PUBLIC_PATHS = new Set(['/login', '/logout', '/healthz']);
 
-export function authMiddleware({ password, publicDir, secureCookie = false }) {
+interface AuthOptions {
+  password: string | undefined;
+  publicDir: string;
+  secureCookie?: boolean;
+}
+
+export function authMiddleware({ password, publicDir, secureCookie = false }: AuthOptions): express.Router {
   const router = express.Router();
   if (!password) return router;
 
   const token = crypto.createHmac('sha256', password).update('chess-llm-session-v1').digest('base64url');
-  const failures = new Map(); // ip -> { count, since }
+  const failures = new Map<string | undefined, { count: number; since: number }>(); // by client IP
 
   router.get('/login', (req, res) => res.sendFile(path.join(publicDir, 'login.html')));
 
@@ -68,13 +74,13 @@ export function authMiddleware({ password, publicDir, secureCookie = false }) {
   return router;
 }
 
-function safeEqual(a, b) {
+function safeEqual(a: string, b: string): boolean {
   const ha = crypto.createHash('sha256').update(a).digest();
   const hb = crypto.createHash('sha256').update(b).digest();
   return crypto.timingSafeEqual(ha, hb);
 }
 
-function readCookie(req, name) {
+function readCookie(req: express.Request, name: string): string | undefined {
   for (const part of (req.headers.cookie ?? '').split(';')) {
     const i = part.indexOf('=');
     if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
@@ -83,11 +89,11 @@ function readCookie(req, name) {
 }
 
 // Only same-site relative paths, so the login page can't be used as an open redirect.
-function safeNext(next) {
+function safeNext(next: unknown): string {
   return typeof next === 'string' && /^\/(?![/\\])/.test(next) ? next : '/';
 }
 
-function loginUrl({ error, next }) {
+function loginUrl({ error, next }: { error?: string; next?: unknown }): string {
   const params = new URLSearchParams();
   if (error) params.set('error', error);
   if (safeNext(next) !== '/') params.set('next', safeNext(next));

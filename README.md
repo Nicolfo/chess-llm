@@ -24,7 +24,7 @@ Illegal moves are caught by the server and sent back to the model to try again. 
 | | |
 |---|---|
 | **Docker** | For [Run with Docker](#run-with-docker) (recommended). [Docker Desktop](https://docs.docker.com/get-docker/) on Windows / macOS, Docker Engine on Linux. |
-| **or Node.js 22.9+ and Git** | For [Run from source](#run-from-source-nodejs). Check with `node --version`; download from [nodejs.org](https://nodejs.org) (LTS is fine) and [git-scm.com](https://git-scm.com). |
+| **or Node.js 22.18+ and Git** | For [Run from source](#run-from-source-nodejs). Check with `node --version`; download from [nodejs.org](https://nodejs.org) (LTS is fine) and [git-scm.com](https://git-scm.com). |
 | **At least one LLM API key** | From any provider you want to play against, e.g. [Anthropic](https://console.anthropic.com), [OpenAI](https://platform.openai.com/api-keys), [Google AI Studio](https://aistudio.google.com/apikey), [DeepSeek](https://platform.deepseek.com), [Moonshot](https://platform.moonshot.ai). Or no key at all if you run a local model with [Ollama](https://ollama.com). |
 | A modern browser | Chrome, Edge, Firefox or Safari. |
 
@@ -118,7 +118,7 @@ To build the image yourself instead (e.g. after changing the code), run `docker 
 
 ## Run from source (Node.js)
 
-For development, or if you prefer not to use Docker. Needs Node.js 22.9+ and Git.
+For development, or if you prefer not to use Docker. Needs Node.js 22.18+ and Git.
 
 ### 1. Get the code and install dependencies
 
@@ -300,7 +300,7 @@ Games are saved on a 1 Gi volume (`persistence` in `helm/values.yaml`, storage c
 
 | problem | fix |
 |---|---|
-| `node: bad option: --env-file-if-exists` | Node.js is too old. Install 22.9 or newer. |
+| `node: bad option: --env-file-if-exists`, or `Unknown file extension ".ts"` | Node.js is too old. Install 22.18 or newer. |
 | An LLM turn fails with `401` / `403` | The key for that provider is missing or wrong in `.env`. Restart the server after editing `.env`. |
 | `404` / "model not found" | The `model` id or `baseUrl` is wrong for your account. Check the provider's model list. |
 | A reasoning model hits the timeout | Calls aren't streamed, so the model must finish all its thinking first. Raise `timeoutMs` for it, or lower its reasoning effort with `extraBody`. |
@@ -336,17 +336,19 @@ The OpenTelemetry packages are pinned to the 2.x line (`sdk-node` 0.223) because
 ## For developers
 
 ```
-src/server.js           Express app + REST API
-src/game.js             game state, prompts, retry loop, game-over detection
-src/llm.js              Anthropic / OpenAI HTTP clients, traced as generations
-src/instrumentation.js  Langfuse / OpenTelemetry setup (imported first)
-src/config.js           config loading + ${ENV} expansion
-src/auth.js             optional password login (APP_PASSWORD)
-src/store.js            saved games (one JSON file per game in DATA_DIR)
+src/server.ts           Express app + REST API
+src/game.ts             game state, prompts, retry loop, game-over detection
+src/llm.ts              Anthropic / OpenAI HTTP clients, traced as generations
+src/instrumentation.ts  Langfuse / OpenTelemetry setup (imported first)
+src/config.ts           config loading + ${ENV} expansion
+src/auth.ts             optional password login (APP_PASSWORD)
+src/store.ts            saved games (one JSON file per game in DATA_DIR)
 public/engine.js        Stockfish (WASM) in a Web Worker, eval and move classification
 helm/                   Helm chart; Dockerfile at the root
 public/                 front-end (vanilla JS, no build step)
 ```
+
+The server is TypeScript that Node runs directly (it strips the types), so there is no build step. That allows only syntax that can simply be erased: no `enum`, `namespace` or constructor parameter properties, and relative imports end in `.ts`. The front-end stays plain JavaScript, type-checked through JSDoc. `npm run typecheck` checks both (server in strict mode); run `npm install` first, it needs the dev dependencies.
 
 REST API:
 
@@ -360,7 +362,7 @@ REST API:
 | POST | `/api/games/:id/pause` | `{paused: true}` or `{paused: false}` (LLM vs LLM only) |
 | POST | `/api/games/:id/resign` | |
 
-Games are saved as one JSON file per game (`src/store.js`, written atomically after every move) and loaded on demand, so a restart loses nothing; a move that was being thought about when the server stopped is simply asked again. LLM calls use their own undici agent so Node's built-in 300 s fetch limit doesn't cut off long reasoning.
+Games are saved as one JSON file per game (`src/store.ts`, written atomically after every move) and loaded on demand, so a restart loses nothing; a move that was being thought about when the server stopped is simply asked again. LLM calls use their own undici agent so Node's built-in 300 s fetch limit doesn't cut off long reasoning.
 
 ## Credits
 

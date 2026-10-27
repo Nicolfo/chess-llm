@@ -1,18 +1,18 @@
-import { shutdownTracing } from './instrumentation.js'; // first: sets up tracing before other modules load
+import { shutdownTracing } from './instrumentation.ts'; // first: sets up tracing before other modules load
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import express from 'express';
-import { authMiddleware } from './auth.js';
-import { hasFastMode, loadConfig, resolveLlm } from './config.js';
-import { Game, GameError } from './game.js';
-import { LlmError } from './llm.js';
-import { GameStore } from './store.js';
+import express, { type NextFunction, type Request, type Response } from 'express';
+import { authMiddleware } from './auth.ts';
+import { hasFastMode, type Llm, loadConfig, resolveLlm } from './config.ts';
+import { Game, GameError } from './game.ts';
+import { LlmError } from './llm.ts';
+import { GameStore } from './store.ts';
 
 const config = loadConfig();
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const store = new GameStore(process.env.DATA_DIR ?? path.join(ROOT, 'data'));
-const games = new Map(); // games in use, loaded from the store on demand
+const games = new Map<string, Game>(); // games in use, loaded from the store on demand
 const MEMORY_TTL_MS = 6 * 60 * 60 * 1000; // idle games leave memory (they stay on disk)
 const RETENTION_MS = Number(process.env.GAME_RETENTION_DAYS ?? 30) * 24 * 60 * 60 * 1000;
 
@@ -33,9 +33,12 @@ app.use(express.static(PUBLIC_DIR));
 // Browser-side analysis: Stockfish (lite single-threaded WASM build) and chess.js for the eval bar.
 const require = createRequire(import.meta.url);
 const STOCKFISH_DIR = path.join(path.dirname(require.resolve('stockfish/package.json')), 'bin');
-const ENGINE_FILES = { 'stockfish.js': 'stockfish-19-lite-single.js', 'stockfish.wasm': 'stockfish-19-lite-single.wasm' };
+const ENGINE_FILES = new Map([
+  ['stockfish.js', 'stockfish-19-lite-single.js'],
+  ['stockfish.wasm', 'stockfish-19-lite-single.wasm'],
+]);
 app.get('/engine/:file', (req, res, next) => {
-  const file = ENGINE_FILES[req.params.file];
+  const file = ENGINE_FILES.get(req.params.file);
   if (!file) return next();
   res.sendFile(path.join(STOCKFISH_DIR, file), { maxAge: '7d' });
 });
@@ -58,8 +61,8 @@ app.get('/api/llms', (req, res) => {
 // An LLM id ending in ":fast" is that LLM in Fast mode (little or no thinking).
 app.post('/api/games', (req, res) => {
   const { mode = 'human', llmId, color = 'random', whiteLlmId, blackLlmId } = req.body ?? {};
-  let white;
-  let black;
+  let white: Llm | null;
+  let black: Llm | null;
   if (mode === 'watch') {
     white = findLlm(whiteLlmId);
     black = findLlm(blackLlmId);
@@ -124,31 +127,32 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-app.use((err, req, res, next) => {
+// Express needs all four parameters to recognise an error handler.
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof GameError) return res.status(err.status).json({ error: err.message });
   if (err instanceof LlmError) {
     console.warn('[llm]', err.message);
     return res.status(502).json({ error: err.message });
   }
-  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON body' });
+  if ((err as { type?: string }).type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON body' });
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
 // "true", a hop count ("1") or a list of trusted proxy addresses; unset = don't trust X-Forwarded-*.
-function parseTrustProxy(value) {
+function parseTrustProxy(value: string | undefined): boolean | number | string {
   if (!value || value === 'false') return false;
   if (value === 'true') return true;
   return /^\d+$/.test(value) ? Number(value) : value;
 }
 
-function findLlm(id) {
+function findLlm(id: unknown): Llm {
   const llm = resolveLlm(config.llms, id);
   if (!llm) throw new GameError(`Unknown LLM "${id}"`, 404);
   return llm;
 }
 
-function getGame(id) {
+function getGame(id: string): Game {
   let game = games.get(id);
   if (!game) {
     const saved = store.load(id);
@@ -184,7 +188,7 @@ const server = app.listen(config.port, () => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, async () => {
     server.close();
-    await shutdownTracing().catch((err) => console.error('[langfuse] shutdown failed:', err.message));
+    await shutdownTracing().catch((err: Error) => console.error('[langfuse] shutdown failed:', err.message));
     process.exit(0);
   });
 }

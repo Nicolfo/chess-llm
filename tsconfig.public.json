@@ -1,0 +1,17 @@
+{
+  // Type checks the browser scripts (public/) as they are (JS + JSDoc); they are served without a build step.
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": [],
+    "allowJs": true,
+    "checkJs": true,
+    // Catches typos, undefined names and wrong DOM/API calls without annotating every function.
+    "strict": false,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["public/*.js"]
+}

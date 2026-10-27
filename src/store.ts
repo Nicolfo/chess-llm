@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Game, SavedGame } from './game.ts';
 
 // One JSON file per game in DATA_DIR, so games survive restarts and redeploys.
 // Writes go to a temp file that is then renamed over the old one, so a crash
@@ -7,44 +8,48 @@ import path from 'node:path';
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export class GameStore {
-  constructor(dir) {
+  readonly dir: string;
+
+  constructor(dir: string) {
     this.dir = path.resolve(dir);
     fs.mkdirSync(this.dir, { recursive: true });
     fs.accessSync(this.dir, fs.constants.W_OK); // fail at startup, not on the first move
   }
 
-  file(id) {
+  file(id: string): string | null {
     if (!ID_RE.test(id)) return null; // ids come from URLs: never build a path from anything else
     return path.join(this.dir, `${id}.json`);
   }
 
-  save(game) {
+  save(game: Game): void {
     const file = this.file(game.id);
+    if (!file) return;
     const tmp = `${file}.${process.pid}.tmp`;
     try {
       fs.writeFileSync(tmp, JSON.stringify(game.serialize()));
       fs.renameSync(tmp, file);
     } catch (err) {
       // Keep playing even if the disk is full or read-only; the game is still in memory.
-      console.error(`[store] could not save game ${game.id}: ${err.message}`);
+      console.error(`[store] could not save game ${game.id}: ${(err as Error).message}`);
       fs.rmSync(tmp, { force: true });
     }
   }
 
   /** The saved game data, or null if there is none. */
-  load(id) {
+  load(id: string): SavedGame | null {
     const file = this.file(id);
     if (!file) return null;
     try {
       return JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (err) {
-      if (err.code !== 'ENOENT') console.error(`[store] could not read game ${id}: ${err.message}`);
+      const { code, message } = err as NodeJS.ErrnoException;
+      if (code !== 'ENOENT') console.error(`[store] could not read game ${id}: ${message}`);
       return null;
     }
   }
 
   /** Delete saved games not touched for longer than maxAgeMs. */
-  prune(maxAgeMs) {
+  prune(maxAgeMs: number): void {
     const cutoff = Date.now() - maxAgeMs;
     let removed = 0;
     for (const name of fs.readdirSync(this.dir)) {
@@ -62,7 +67,7 @@ export class GameStore {
     if (removed) console.log(`[store] removed ${removed} game(s) older than ${Math.round(maxAgeMs / 86_400_000)} days`);
   }
 
-  count() {
+  count(): number {
     return fs.readdirSync(this.dir).filter((n) => n.endsWith('.json')).length;
   }
 }

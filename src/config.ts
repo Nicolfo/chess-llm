@@ -5,11 +5,70 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PROVIDERS = new Set(['anthropic', 'openai']);
 
+export type Provider = 'anthropic' | 'openai';
+export type JsonObject = Record<string, unknown>;
+
+/** An entry of "llms" in config.json, as written. */
+interface LlmEntry {
+  id?: string;
+  name?: string;
+  provider: Provider;
+  baseUrl?: string;
+  apiKey?: string;
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+  showLegalMoves?: boolean;
+  headers?: Record<string, string>;
+  extraBody?: JsonObject;
+  fastModeBody?: JsonObject;
+  thinkingBudget?: number;
+  timeoutMs?: number;
+  description?: string;
+  icon?: string;
+}
+
+interface ConfigFile {
+  port?: number;
+  maxAttempts?: number;
+  requestTimeoutMs?: number;
+  showLegalMoves?: boolean;
+  llms?: LlmEntry[];
+}
+
+/** A configured LLM with defaults applied. */
+export interface Llm {
+  id: string;
+  name: string;
+  provider: Provider;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  maxTokens?: number;
+  temperature?: number;
+  showLegalMoves: boolean;
+  headers: Record<string, string>;
+  extraBody: JsonObject;
+  fastModeBody: JsonObject;
+  thinkingBudget?: number;
+  timeoutMs?: number;
+  description: string;
+  icon: string;
+}
+
+export interface Config {
+  file: string;
+  port: number;
+  maxAttempts: number;
+  requestTimeoutMs: number;
+  llms: Llm[];
+}
+
 // "${ENV_VAR}" anywhere in a string is replaced by process.env.ENV_VAR,
 // so API keys can stay out of the config file.
-function expandEnv(value) {
+function expandEnv(value: unknown): unknown {
   if (typeof value === 'string') {
-    return value.replace(/\$\{([A-Z0-9_]+)\}/gi, (_, name) => process.env[name] ?? '');
+    return value.replace(/\$\{([A-Z0-9_]+)\}/gi, (_, name: string) => process.env[name] ?? '');
   }
   if (Array.isArray(value)) return value.map(expandEnv);
   if (value && typeof value === 'object') {
@@ -18,7 +77,7 @@ function expandEnv(value) {
   return value;
 }
 
-function resolveConfigPath() {
+function resolveConfigPath(): string {
   if (process.env.CHESS_LLM_CONFIG) return path.resolve(process.env.CHESS_LLM_CONFIG);
   const local = path.join(ROOT, 'config.json');
   if (fs.existsSync(local)) return local;
@@ -26,11 +85,11 @@ function resolveConfigPath() {
   return path.join(ROOT, 'config.example.json');
 }
 
-export function loadConfig() {
+export function loadConfig(): Config {
   const file = resolveConfigPath();
-  const raw = expandEnv(JSON.parse(fs.readFileSync(file, 'utf8')));
+  const raw = expandEnv(JSON.parse(fs.readFileSync(file, 'utf8'))) as ConfigFile;
 
-  const llms = (raw.llms ?? []).map((llm, i) => {
+  const llms = (raw.llms ?? []).map((llm, i): Llm => {
     const id = llm.id ?? `llm-${i}`;
     if (!PROVIDERS.has(llm.provider)) {
       throw new Error(`[config] llms[${i}] (${id}): provider must be one of ${[...PROVIDERS].join(', ')}`);
@@ -61,7 +120,7 @@ export function loadConfig() {
     };
   });
 
-  const ids = new Set();
+  const ids = new Set<string>();
   for (const llm of llms) {
     if (ids.has(llm.id)) throw new Error(`[config] duplicate llm id "${llm.id}"`);
     ids.add(llm.id);
@@ -78,17 +137,17 @@ export function loadConfig() {
 
 const FAST_SUFFIX = ':fast';
 
-export const hasFastMode = (llm) => Object.keys(llm.fastModeBody).length > 0;
+export const hasFastMode = (llm: Llm): boolean => Object.keys(llm.fastModeBody).length > 0;
 
 /** The configured LLM with this id; "<id>:fast" is that LLM in Fast mode. */
-export function resolveLlm(llms, id) {
+export function resolveLlm(llms: Llm[], id: unknown): Llm | undefined {
   const fast = typeof id === 'string' && id.endsWith(FAST_SUFFIX);
   const llm = llms.find((l) => l.id === (fast ? id.slice(0, -FAST_SUFFIX.length) : id));
   if (!llm || !fast) return llm;
   if (!hasFastMode(llm)) return undefined;
   return {
     ...llm,
-    id,
+    id: id as string,
     name: `${llm.name} (fast)`,
     extraBody: { ...llm.extraBody, ...llm.fastModeBody },
     thinkingBudget: undefined,
@@ -97,7 +156,7 @@ export function resolveLlm(llms, id) {
 
 // Avatar for the menu and player bars: a file in public/icons (name without .svg).
 // Set "icon" in the config to override (an icon name or an image URL), or "" for none.
-const ICON_PATTERNS = [
+const ICON_PATTERNS: [string, RegExp][] = [
   ['claude', /claude|anthropic/],
   ['gemini', /gemini|googleapis/],
   ['deepseek', /deepseek/],
@@ -105,11 +164,11 @@ const ICON_PATTERNS = [
   ['openai', /\bgpt|openai|\bo\d/],
 ];
 
-function guessIcon(llm) {
+function guessIcon(llm: LlmEntry): string {
   const haystack = `${llm.model} ${llm.name ?? ''} ${llm.baseUrl ?? ''}`.toLowerCase();
   return ICON_PATTERNS.find(([, re]) => re.test(haystack))?.[0] ?? '';
 }
 
-function defaultBaseUrl(provider) {
+function defaultBaseUrl(provider: Provider): string {
   return provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1';
 }

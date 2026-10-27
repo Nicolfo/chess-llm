@@ -23,4 +23,4 @@ COPY config.example.json ./
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack         /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack         /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-*     && mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3000
-CMD ["node", "--env-file-if-exists=.env", "src/server.js"]
+CMD ["node", "--env-file-if-exists=.env", "src/server.ts"]
