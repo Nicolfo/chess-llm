@@ -1,6 +1,6 @@
 app:
   imageName: registry.nicolfo.it/nicolfo/chess-llm
-  imageTag: 1.4.1
+  imageTag: 1.4.2
   imagePullPolicy: IfNotPresent
   port: 3000
   resources:
