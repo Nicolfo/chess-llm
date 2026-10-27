@@ -8,6 +8,7 @@ A chess.com-style web app where you play chess against large language models, or
 
 - **Play vs LLM**: pick an opponent and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
 - **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time (a paused game stays paused when you reopen it); while paused, ⏭ Step (or the → key) plays one move at a time.
+- **LLM vs engine**: Stockfish appears in the same lists as the LLMs, at several strengths (about 1350 to 2500 Elo, plus full strength). Pick it for one side to see how an LLM holds up against a known level, or play against it yourself. It runs on the server, needs no API key and costs nothing.
 - **Engine analysis** (📈 Engine): a Stockfish eval bar, the engine's best line, and every move labelled Best / Excellent / Good / Inaccuracy / Mistake / Blunder with an accuracy score per side, like chess.com's game review. Live in LLM vs LLM; against an LLM it appears once the game is over. Stockfish runs in your browser, so it costs nothing and needs no setup.
 - **Fast mode** (⚡ checkbox under each model pick): the model thinks little or not at all, so moves take seconds instead of minutes, at the cost of weaker play. Thinking is turned off where the provider allows it (DeepSeek, Kimi, Gemini 4 Argon), otherwise set to the lowest effort (Claude, GPT, Gemini 3.8 Flash).
 
@@ -204,6 +205,12 @@ Games are saved in the `data/` folder (one JSON file per game), so they survive 
       "baseUrl": "http://localhost:11434/v1",
       "model": "llama3.1",
       "showLegalMoves": true
+    },
+    {
+      "id": "stockfish-1600",
+      "name": "Stockfish 1600",
+      "provider": "engine",
+      "elo": 1600
     }
   ]
 }
@@ -223,7 +230,7 @@ Per-model settings:
 | field | |
 |---|---|
 | `id` | unique id (required if you have several entries for the same model) |
-| `provider` | `anthropic` (Messages API) or `openai` (Chat Completions API, used for every OpenAI-compatible vendor) |
+| `provider` | `anthropic` (Messages API), `openai` (Chat Completions API, used for every OpenAI-compatible vendor), or `engine` (Stockfish, see below) |
 | `baseUrl` | API root. Anthropic: `https://api.anthropic.com`. OpenAI-style: the URL before `/chat/completions` |
 | `apiKey` | `${ENV_VAR}` to read it from `.env` / the environment (recommended), or the literal key |
 | `model` | model id sent to the API (required) |
@@ -235,7 +242,17 @@ Per-model settings:
 | `timeoutMs` | per-model override of `requestTimeoutMs` |
 | `fastModeBody` | merged into the request in Fast mode: thinking off, or as low as the model allows. DeepSeek / Kimi: `{ "thinking": { "type": "disabled" } }`; Claude: `{ "output_config": { "effort": "low" } }`; OpenAI / Gemini: `{ "reasoning_effort": "low" }` (`"none"` where supported). Fast mode is offered in the lobby only for models that have it |
 | `thinkingBudget` | `openai` provider only: when the model has thought for this many tokens without answering, stop it and ask for the move again in Fast mode, handing over its analysis so far. A safety net against runaway thinking (DeepSeek can think for 5+ minutes on a hard position); set it high enough that normal moves are unaffected, but low enough to be reached before the timeout: thinking streams at roughly 40-60 tokens/s, so `16000` takes about 5 minutes against the default 10-minute `requestTimeoutMs`. Cut-off moves show as warnings in Langfuse |
-| `icon` | avatar: `claude`, `openai`, `gemini`, `kimi`, `deepseek` (files in `public/icons`), an image URL, or `""` for a letter. Guessed from the model, name and URL when omitted |
+| `icon` | avatar: `claude`, `openai`, `gemini`, `kimi`, `deepseek`, `stockfish` (files in `public/icons`), an image URL, or `""` for a letter. Guessed from the model, name and URL when omitted |
+
+Stockfish entries (`"provider": "engine"`) need no `model`, `baseUrl` or `apiKey`, and only take these settings besides `id`, `name`, `description` and `icon`:
+
+| field | |
+|---|---|
+| `elo` | limit the strength to this Elo, `1320` to `3190` (Stockfish's `UCI_Elo`). Calibrated against other engines, so treat it as a rough level rather than a FIDE rating |
+| `skillLevel` | instead of `elo`: Stockfish's `Skill Level`, `0` (weakest, below 1320) to `20`. Not calibrated in Elo |
+| `movetimeMs` | thinking time per move, default `1000` |
+
+Without `elo` or `skillLevel` the engine plays at full strength. Each move runs its own Stockfish process (the same single-threaded WASM build the browser uses for analysis), so a move takes one CPU core for `movetimeMs`. Engine moves show their evaluation instead of a reason, and are not traced to Langfuse.
 
 API keys and base URLs never leave the server; the browser only sees each model's id, name, provider and model.
 
@@ -339,7 +356,7 @@ choose-move        agent      input: side, move number, opponent's last move, FE
 └─ ...             one generate/validate pair per retry
 ```
 
-- `sessionId` = game id, so the Sessions view replays a whole game; tags `vs-human` / `llm-vs-llm`; metadata `gameId`, `llmId`, `side`, `ply`.
+- `sessionId` = game id, so the Sessions view replays a whole game; tags `vs-human` / `llm-vs-llm` / `vs-engine`; metadata `gameId`, `llmId`, `side`, `ply`.
 - Token usage is split into cached / reasoning buckets so cost isn't double counted.
 - Provider errors mark the generation and the turn as `ERROR`; anything resembling an API key is masked before export.
 - `LANGFUSE_TRACING_ENVIRONMENT` sets the environment, `LANGFUSE_RELEASE` the release (defaults to the package version).
@@ -352,6 +369,7 @@ The OpenTelemetry packages are pinned to the 2.x line (`sdk-node` 0.223) because
 src/server.ts           Express app + REST API
 src/game.ts             game state, prompts, retry loop, game-over detection
 src/llm.ts              Anthropic / OpenAI HTTP clients, traced as generations
+src/engine.ts           Stockfish as a player (one UCI process per move)
 src/instrumentation.ts  Langfuse / OpenTelemetry setup (imported first)
 src/config.ts           config loading + ${ENV} expansion
 src/auth.ts             optional password login (APP_PASSWORD)

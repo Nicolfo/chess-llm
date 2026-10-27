@@ -3,9 +3,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PROVIDERS = new Set(['anthropic', 'openai']);
+const PROVIDERS = new Set(['anthropic', 'openai', 'engine']);
 
-export type Provider = 'anthropic' | 'openai';
+// Stockfish's UCI_Elo and Skill Level ranges
+const ELO_RANGE = [1320, 3190];
+const SKILL_RANGE = [0, 20];
+
+export type Provider = 'anthropic' | 'openai' | 'engine';
 export type JsonObject = Record<string, unknown>;
 
 /** An entry of "llms" in config.json, as written. */
@@ -15,7 +19,10 @@ interface LlmEntry {
   provider: Provider;
   baseUrl?: string;
   apiKey?: string;
-  model: string;
+  model?: string;
+  elo?: number;
+  skillLevel?: number;
+  movetimeMs?: number;
   maxTokens?: number;
   temperature?: number;
   showLegalMoves?: boolean;
@@ -44,6 +51,10 @@ export interface Llm {
   baseUrl: string;
   apiKey: string;
   model: string;
+  // provider "engine" only: Stockfish's strength and thinking time per move
+  elo?: number;
+  skillLevel?: number;
+  movetimeMs?: number;
   maxTokens?: number;
   temperature?: number;
   showLegalMoves: boolean;
@@ -94,15 +105,21 @@ export function loadConfig(): Config {
     if (!PROVIDERS.has(llm.provider)) {
       throw new Error(`[config] llms[${i}] (${id}): provider must be one of ${[...PROVIDERS].join(', ')}`);
     }
-    if (!llm.model) throw new Error(`[config] llms[${i}] (${id}): "model" is required`);
+    const engine = llm.provider === 'engine';
+    if (!llm.model && !engine) throw new Error(`[config] llms[${i}] (${id}): "model" is required`);
     if (id.endsWith(FAST_SUFFIX)) throw new Error(`[config] llms[${i}] (${id}): ids must not end with "${FAST_SUFFIX}"`);
+    if (engine) checkEngine(llm, `[config] llms[${i}] (${id})`);
+    const model = llm.model ?? engineModel(llm);
     return {
       id,
-      name: llm.name ?? llm.model,
+      name: llm.name ?? model,
       provider: llm.provider,
       baseUrl: (llm.baseUrl ?? defaultBaseUrl(llm.provider)).replace(/\/+$/, ''),
       apiKey: llm.apiKey ?? '',
-      model: llm.model,
+      model,
+      elo: engine ? llm.elo : undefined,
+      skillLevel: engine ? llm.skillLevel : undefined,
+      movetimeMs: engine ? llm.movetimeMs : undefined,
       maxTokens: llm.maxTokens,
       temperature: llm.temperature,
       showLegalMoves: llm.showLegalMoves ?? raw.showLegalMoves ?? false,
@@ -165,10 +182,30 @@ const ICON_PATTERNS: [string, RegExp][] = [
 ];
 
 function guessIcon(llm: LlmEntry): string {
+  if (llm.provider === 'engine') return 'stockfish';
   const haystack = `${llm.model} ${llm.name ?? ''} ${llm.baseUrl ?? ''}`.toLowerCase();
   return ICON_PATTERNS.find(([, re]) => re.test(haystack))?.[0] ?? '';
 }
 
 function defaultBaseUrl(provider: Provider): string {
+  if (provider === 'engine') return '';
   return provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1';
+}
+
+function checkEngine(llm: LlmEntry, where: string): void {
+  const inRange = (value: number | undefined, [min, max]: number[]) =>
+    value === undefined || (Number.isInteger(value) && value >= min && value <= max);
+  if (llm.elo !== undefined && llm.skillLevel !== undefined) throw new Error(`${where}: set "elo" or "skillLevel", not both`);
+  if (!inRange(llm.elo, ELO_RANGE)) throw new Error(`${where}: "elo" must be a whole number from ${ELO_RANGE.join(' to ')}`);
+  if (!inRange(llm.skillLevel, SKILL_RANGE)) {
+    throw new Error(`${where}: "skillLevel" must be a whole number from ${SKILL_RANGE.join(' to ')}`);
+  }
+  if (!inRange(llm.movetimeMs, [10, 60_000])) throw new Error(`${where}: "movetimeMs" must be a whole number from 10 to 60000`);
+}
+
+/** Shown under the name in the lobby, e.g. "Stockfish 19 · Elo 1500". */
+function engineModel(llm: LlmEntry): string {
+  if (llm.elo !== undefined) return `Stockfish 19 · Elo ${llm.elo}`;
+  if (llm.skillLevel !== undefined) return `Stockfish 19 · skill level ${llm.skillLevel}`;
+  return 'Stockfish 19 · full strength';
 }

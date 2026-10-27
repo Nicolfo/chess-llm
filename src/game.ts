@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Chess, type Color, type Square } from 'chess.js';
 import { type LangfuseAgent, propagateAttributes, startActiveObservation, startObservation } from '@langfuse/tracing';
 import { type Config, type Llm, resolveLlm } from './config.ts';
+import { engineMove, engineReason } from './engine.ts';
 import { type ChatMessage, chat } from './llm.ts';
 
 const COLOR_NAME: Record<Color, string> = { w: 'White', b: 'Black' };
@@ -213,15 +214,20 @@ export class Game {
     this.llmTurns.push(turn);
 
     try {
-      // One trace per LLM move; all moves of a game share a session.
-      await propagateAttributes(
-        {
-          sessionId: this.id,
-          tags: [this.mode === 'watch' ? 'llm-vs-llm' : 'vs-human'],
-          metadata: { gameId: this.id, llmId: llm.id, side: COLOR_NAME[color], ply },
-        },
-        () => startActiveObservation('choose-move', (agent) => this.playTurn(agent, turn, llm, color), { asType: 'agent' }),
-      );
+      if (llm.provider === 'engine') {
+        // not traced: an engine move costs nothing and would skew the LLM stats
+        await this.playEngineTurn(turn, llm, color);
+      } else {
+        // One trace per LLM move; all moves of a game share a session.
+        await propagateAttributes(
+          {
+            sessionId: this.id,
+            tags: [this.opponentKind(color)],
+            metadata: { gameId: this.id, llmId: llm.id, side: COLOR_NAME[color], ply },
+          },
+          () => startActiveObservation('choose-move', (agent) => this.playTurn(agent, turn, llm, color), { asType: 'agent' }),
+        );
+      }
     } catch (err) {
       turn.error = (err as Error).message;
       this.lastError = turn.error;
@@ -243,7 +249,7 @@ export class Game {
         fen: this.chess.fen(),
       },
     });
-    const opponent = this.players[OTHER[color]] ? 'another AI model' : 'a human';
+    const opponent = { 'vs-human': 'a human', 'vs-engine': 'a chess engine', 'llm-vs-llm': 'another AI model' }[this.opponentKind(color)];
     const messages: ChatMessage[] = [{ role: 'user', content: this.buildPrompt(color, llm) }];
 
     try {
@@ -309,6 +315,32 @@ export class Game {
       agent.update({ level: 'ERROR', statusMessage: (err as Error).message, metadata: { attempts: turn.attempts.length } });
       throw err;
     }
+  }
+
+  /** Who plays against `color`; also the Langfuse tag of that side's moves. */
+  opponentKind(color: Color): 'vs-human' | 'vs-engine' | 'llm-vs-llm' {
+    const opponent = this.players[OTHER[color]];
+    if (!opponent) return 'vs-human';
+    return opponent.provider === 'engine' ? 'vs-engine' : 'llm-vs-llm';
+  }
+
+  /** Stockfish's move, recorded like a one-attempt LLM turn so the move log shows it. */
+  async playEngineTurn(turn: LlmTurn, engine: Llm, color: Color): Promise<void> {
+    const result = await engineMove(engine, this.chess.history({ verbose: true }).map((m) => m.lan));
+    const attempt: Attempt = { answer: result.log, move: null, error: null };
+    turn.attempts.push(attempt);
+    const { uci } = result;
+    try {
+      attempt.move = this.chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }).san;
+    } catch {
+      attempt.error = `"${uci}" is not a legal move`;
+      throw new GameError(`${engine.name} played an illegal move: ${uci}`, 500);
+    }
+    const reason = engineReason(result, COLOR_NAME[color]);
+    turn.move = attempt.move;
+    turn.reason = reason;
+    this.reasons[turn.ply] = reason;
+    this.checkGameOver();
   }
 
   /** Play the candidate move if it is legal. */

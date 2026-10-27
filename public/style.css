@@ -200,6 +200,7 @@ body {
 }
 .avatar.anthropic { background: #c96442; }
 .avatar.openai { background: #10a37f; }
+.avatar.engine { background: #3d6b8f; }
 .avatar.you { background: #4a7bb7; font-size: 13px; }
 
 /* ---------- Game layout ---------- */

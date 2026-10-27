@@ -180,7 +180,7 @@ const server = app.listen(config.port, () => {
   console.log(`Games: ${store.dir} (${store.count()} saved)`);
   console.log(`Config: ${config.file} (${config.llms.length} LLMs: ${config.llms.map((l) => l.name).join(', ')})`);
   for (const llm of config.llms) {
-    if (!llm.apiKey) console.warn(`[config] "${llm.name}" has no apiKey (fine for local servers, otherwise set it)`);
+    if (!llm.apiKey && llm.provider !== 'engine') console.warn(`[config] "${llm.name}" has no apiKey (fine for local servers, otherwise set it)`);
   }
 });
 

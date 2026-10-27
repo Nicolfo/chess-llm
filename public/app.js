@@ -224,7 +224,7 @@ async function showLobby() {
 }
 
 // Card tag: the model's vendor (several vendors are reached through the OpenAI-compatible API).
-const VENDOR = { claude: 'Anthropic', openai: 'OpenAI', gemini: 'Google', kimi: 'Moonshot', deepseek: 'DeepSeek' };
+const VENDOR = { claude: 'Anthropic', openai: 'OpenAI', gemini: 'Google', kimi: 'Moonshot', deepseek: 'DeepSeek', stockfish: 'Engine' };
 
 function llmCards(selectedId) {
   if (!state.llms.length) return '<p class="muted">No LLMs configured. Add some to <code>config.json</code>.</p>';

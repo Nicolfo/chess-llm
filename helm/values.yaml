@@ -111,6 +111,30 @@ config:
       apiKey: ${DEEPSEEK_API_KEY}
       thinkingBudget: 16000
       fastModeBody: { thinking: { type: disabled } }
+    - id: stockfish-1350
+      name: Stockfish 1350
+      description: Club beginner
+      provider: engine
+      elo: 1350
+    - id: stockfish-1600
+      name: Stockfish 1600
+      description: Casual club player
+      provider: engine
+      elo: 1600
+    - id: stockfish-2000
+      name: Stockfish 2000
+      description: Strong club player
+      provider: engine
+      elo: 2000
+    - id: stockfish-2500
+      name: Stockfish 2500
+      description: Grandmaster level
+      provider: engine
+      elo: 2500
+    - id: stockfish-max
+      name: Stockfish Max
+      description: Full strength, far beyond any human
+      provider: engine
 
 ingress:
   enabled: true
