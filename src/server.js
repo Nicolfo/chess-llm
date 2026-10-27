@@ -133,7 +133,7 @@ app.use((err, req, res, next) => {
 function parseTrustProxy(value) {
   if (!value || value === 'false') return false;
   if (value === 'true') return true;
-  return /^d+$/.test(value) ? Number(value) : value;
+  return /^\d+$/.test(value) ? Number(value) : value;
 }
 
 function findLlm(id) {
