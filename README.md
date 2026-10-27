@@ -194,7 +194,7 @@ Games are saved in the `data/` folder (one JSON file per game), so they survive 
       "baseUrl": "https://api.deepseek.com",
       "apiKey": "${DEEPSEEK_API_KEY}",
       "model": "deepseek-flash",
-      "thinkingBudget": 40000,
+      "thinkingBudget": 16000,
       "fastModeBody": { "thinking": { "type": "disabled" } }
     },
     {
@@ -228,13 +228,13 @@ Per-model settings:
 | `apiKey` | `${ENV_VAR}` to read it from `.env` / the environment (recommended), or the literal key |
 | `model` | model id sent to the API (required) |
 | `name`, `description` | shown in the menu |
-| `maxTokens`, `temperature` | optional generation parameters |
+| `maxTokens`, `temperature` | optional generation parameters (`maxTokens` defaults to 16000 for Anthropic, which requires it; it includes thinking) |
 | `showLegalMoves` | include the list of legal moves in the prompt (helps small local models) |
 | `headers` | extra HTTP headers |
 | `extraBody` | merged into the request body, for provider options such as `{ "reasoning_effort": "low" }` |
 | `timeoutMs` | per-model override of `requestTimeoutMs` |
 | `fastModeBody` | merged into the request in Fast mode: thinking off, or as low as the model allows. DeepSeek / Kimi: `{ "thinking": { "type": "disabled" } }`; Claude: `{ "output_config": { "effort": "low" } }`; OpenAI / Gemini: `{ "reasoning_effort": "low" }` (`"none"` where supported). Fast mode is offered in the lobby only for models that have it |
-| `thinkingBudget` | `openai` provider only: when the model has thought for this many tokens without answering, stop it and ask for the move again in Fast mode, handing over its analysis so far. A safety net against runaway thinking (DeepSeek can think for 5+ minutes on a hard position); set it high, e.g. `40000`, so normal moves are unaffected. Cut-off moves show as warnings in Langfuse |
+| `thinkingBudget` | `openai` provider only: when the model has thought for this many tokens without answering, stop it and ask for the move again in Fast mode, handing over its analysis so far. A safety net against runaway thinking (DeepSeek can think for 5+ minutes on a hard position); set it high enough that normal moves are unaffected, but low enough to be reached before the timeout: thinking streams at roughly 40-60 tokens/s, so `16000` takes about 5 minutes against the default 10-minute `requestTimeoutMs`. Cut-off moves show as warnings in Langfuse |
 | `icon` | avatar: `claude`, `openai`, `gemini`, `kimi`, `deepseek` (files in `public/icons`), an image URL, or `""` for a letter. Guessed from the model, name and URL when omitted |
 
 API keys and base URLs never leave the server; the browser only sees each model's id, name, provider and model.

@@ -80,7 +80,6 @@ function systemPrompt(opponent: string): string {
 On every turn you receive the current position and your opponent's last move, and you must choose your next move.
 
 Rules for your answer:
-- You may think briefly first, but keep it short.
 - Your answer MUST end with these two lines, in this order:
 REASON: <one or two sentences explaining why you chose this move>
 MOVE: <move>

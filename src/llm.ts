@@ -78,6 +78,10 @@ interface OpenAiChunk {
 // reasoning runs short, so disable them and rely on the per-request AbortSignal timeout.
 const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 
+// Anthropic requires max_tokens. Thinking counts towards it, so leave room for long
+// analyses; a lower cap cuts the answer off with stop_reason "max_tokens".
+const ANTHROPIC_DEFAULT_MAX_TOKENS = 16_000;
+
 /**
  * @param llm      entry from config.llms
  * @param system   system prompt
@@ -138,7 +142,7 @@ async function generate(
 ): Promise<ChatResult> {
   const call = llm.provider === 'anthropic' ? anthropicChat : openaiChat;
   const modelParameters: Record<string, string | number> = {};
-  if (llm.maxTokens !== undefined || llm.provider === 'anthropic') modelParameters.max_tokens = llm.maxTokens ?? 4096;
+  if (llm.maxTokens !== undefined || llm.provider === 'anthropic') modelParameters.max_tokens = llm.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS;
   if (llm.temperature !== undefined) modelParameters.temperature = llm.temperature;
   for (const [key, value] of Object.entries(llm.extraBody)) {
     if (typeof value === 'string' || typeof value === 'number') modelParameters[key] = value;
@@ -194,7 +198,7 @@ async function anthropicChat(llm: Llm, system: string, messages: ChatMessage[], 
   const url = llm.baseUrl.endsWith('/v1') ? `${llm.baseUrl}/messages` : `${llm.baseUrl}/v1/messages`;
   const body: JsonObject = {
     model: llm.model,
-    max_tokens: llm.maxTokens ?? 4096,
+    max_tokens: llm.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
     system,
     messages,
   };

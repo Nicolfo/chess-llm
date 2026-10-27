@@ -72,7 +72,7 @@
       "baseUrl": "https://api.moonshot.ai/v1",
       "model": "kimi-k3",
       "apiKey": "${MOONSHOT_API_KEY}",
-      "thinkingBudget": 40000,
+      "thinkingBudget": 16000,
       "fastModeBody": { "thinking": { "type": "disabled" } }
     },
     {
@@ -83,7 +83,7 @@
       "baseUrl": "https://api.deepseek.com",
       "model": "deepseek-v4-pro",
       "apiKey": "${DEEPSEEK_API_KEY}",
-      "thinkingBudget": 40000,
+      "thinkingBudget": 16000,
       "fastModeBody": { "thinking": { "type": "disabled" } }
     },
     {
@@ -94,7 +94,7 @@
       "baseUrl": "https://api.deepseek.com",
       "model": "deepseek-flash",
       "apiKey": "${DEEPSEEK_API_KEY}",
-      "thinkingBudget": 40000,
+      "thinkingBudget": 16000,
       "fastModeBody": { "thinking": { "type": "disabled" } }
     }
   ]

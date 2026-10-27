@@ -91,7 +91,7 @@ config:
       baseUrl: https://api.moonshot.ai/v1
       model: kimi-k3
       apiKey: ${MOONSHOT_API_KEY}
-      thinkingBudget: 40000
+      thinkingBudget: 16000
       fastModeBody: { thinking: { type: disabled } }
     - id: deepseek-v4-pro
       name: DeepSeek V4 Pro
@@ -100,7 +100,7 @@ config:
       baseUrl: https://api.deepseek.com
       model: deepseek-v4-pro
       apiKey: ${DEEPSEEK_API_KEY}
-      thinkingBudget: 40000
+      thinkingBudget: 16000
       fastModeBody: { thinking: { type: disabled } }
     - id: deepseek-flash
       name: DeepSeek V4.1 Flash
@@ -109,7 +109,7 @@ config:
       baseUrl: https://api.deepseek.com
       model: deepseek-flash
       apiKey: ${DEEPSEEK_API_KEY}
-      thinkingBudget: 40000
+      thinkingBudget: 16000
       fastModeBody: { thinking: { type: disabled } }
 
 ingress:
