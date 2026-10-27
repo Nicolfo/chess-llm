@@ -1,6 +1,6 @@
 {
   "name": "chess-llm",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "Play chess against LLMs",
   "main": "src/server.ts",
   "scripts": {
