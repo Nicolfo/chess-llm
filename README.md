@@ -1,20 +1,21 @@
 # Chess LLM
 
-A chess.com-style web app where you play chess against large language models, or watch two of them play each other.
+A chess.com-style web app where you play chess against large language models, watch two of them play each other, or pit one against Stockfish at a strength you choose.
 
 ![Claude Opus 5.5 vs Gemini 3.8 Flash in LLM vs LLM mode, paused after 12. g5 of a Sicilian English Attack, with the Stockfish eval bar and move labels](docs/screenshot.png)
 
 *A real game: Claude Opus 5.5 (White) vs Gemini 3.8 Flash (Black), paused after move 12. Each move shows the model's reason and Stockfish's verdict; the eval bar, best line and accuracy are on the side.*
 
-- **Play vs LLM**: pick an opponent and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
+- **Play vs LLM**: pick an opponent (an LLM, or Stockfish) and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
 - **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time (a paused game stays paused when you reopen it); while paused, ⏭ Step (or the → key) plays one move at a time.
 - **LLM vs Engine**: its own lobby tab. Pick a model, a Stockfish strength (about 1350 to 2500 Elo, plus full strength) and the model's side, and watch how it holds up against a known level. Stockfish is also in the Play vs LLM list, so you can play it yourself. It runs on the server, needs no API key and costs nothing.
 - **Draw offers**: from move 30, each side may offer a draw once every 10 moves: LLMs with a `DRAW: offer` line, Stockfish when the position is equal, you with the ½ Offer draw button (the offer goes with your next move). The opponent accepts, or declines by playing a move. Moves that came with an offer are marked `(=)`.
-- **Engine analysis** (📈 Engine): a Stockfish eval bar, the engine's best line, and every move labelled Best / Excellent / Good / Inaccuracy / Mistake / Blunder with an accuracy score per side, like chess.com's game review. Live in LLM vs LLM; against an LLM it appears once the game is over. Stockfish runs in your browser, so it costs nothing and needs no setup.
+- **Engine analysis** (📈 Engine): a Stockfish eval bar, the engine's best line, and every move labelled Best / Excellent / Good / Inaccuracy / Mistake / Blunder with an accuracy score per side, like chess.com's game review. Live when watching (LLM vs LLM, LLM vs Engine); when you play, it appears once the game is over. Stockfish runs in your browser, so it costs nothing and needs no setup.
 - **Fast mode** (⚡ checkbox under each model pick): the model thinks little or not at all, so moves take seconds instead of minutes, at the cost of weaker play. Thinking is turned off where the provider allows it (DeepSeek, Kimi, Gemini 4 Argon), otherwise set to the lowest effort (Claude, GPT, Gemini 3.8 Flash).
 
 <p align="center">
-  <img src="docs/llm-vs-llm.png" alt="LLM vs LLM setup: Claude Opus 5.5 selected for White, Gemini 3.8 Flash for Black" width="480">
+  <img src="docs/llm-vs-llm.png" alt="LLM vs LLM setup: Claude Opus 5.5 selected for White, Gemini 3.8 Flash for Black" width="400">
+  <img src="docs/llm-vs-engine.png" alt="LLM vs Engine setup: Claude Opus 5.5 playing White against Stockfish 2000" width="400">
 </p>
 
 Any model behind the **Anthropic Messages API** or an **OpenAI-compatible Chat Completions API** works: Claude, GPT, Gemini, DeepSeek, Kimi, OpenRouter, or local models through Ollama / LM Studio / vLLM.
@@ -171,7 +172,7 @@ Games are saved in the `data/` folder (one JSON file per game), so they survive 
 
 ## Configuring opponents
 
-`config.json` holds the list of LLMs shown in the main menu:
+`config.json` holds the LLMs and Stockfish levels shown in the lobby:
 
 ```json
 {
