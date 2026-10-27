@@ -552,6 +552,16 @@ body {
 }
 .side-label svg { width: 26px; height: 26px; }
 .swap-btn { align-self: center; font-size: 20px; padding: 8px 10px; }
+.fast-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.fast-toggle input { accent-color: var(--green); margin: 0; }
+.fast-toggle .muted { font-size: 12px; }
 
 .llm-list.compact .llm-card { padding: 8px 10px; gap: 10px; }
 .llm-list.compact .avatar { width: 34px; height: 34px; font-size: 16px; }

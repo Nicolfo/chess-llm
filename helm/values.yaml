@@ -43,6 +43,7 @@ config:
       baseUrl: https://api.anthropic.com
       model: claude-opus-5-5
       apiKey: ${ANTHROPIC_API_KEY}
+      fastModeBody: { output_config: { effort: low } }
     - id: fable-5.1
       name: Claude Fable 5.1
       description: Anthropic Fable
@@ -50,6 +51,7 @@ config:
       baseUrl: https://api.anthropic.com
       model: claude-fable-5-1
       apiKey: ${ANTHROPIC_API_KEY}
+      fastModeBody: { output_config: { effort: low } }
     - id: gpt-6-astra
       name: GPT-6 Astra
       description: OpenAI's flagship for complex reasoning
@@ -57,6 +59,7 @@ config:
       baseUrl: https://api.openai.com/v1
       model: gpt-6-astra
       apiKey: ${OPENAI_API_KEY}
+      fastModeBody: { reasoning_effort: low }
     - id: gpt-6.1-sol
       name: GPT-6.1 Sol
       description: OpenAI Sol family
@@ -64,6 +67,7 @@ config:
       baseUrl: https://api.openai.com/v1
       model: gpt-6.1-sol
       apiKey: ${OPENAI_API_KEY}
+      fastModeBody: { reasoning_effort: low }
     - id: gemini-4-argon
       name: Gemini 4 Argon
       description: Google's most capable Gemini
@@ -71,6 +75,7 @@ config:
       baseUrl: https://generativelanguage.googleapis.com/v1beta/openai
       model: gemini-4-argon
       apiKey: ${GEMINI_API_KEY}
+      fastModeBody: { reasoning_effort: none }
     - id: gemini-3.8-flash
       name: Gemini 3.8 Flash
       description: Fast Gemini
@@ -78,6 +83,7 @@ config:
       baseUrl: https://generativelanguage.googleapis.com/v1beta/openai
       model: gemini-3.8-flash
       apiKey: ${GEMINI_API_KEY}
+      fastModeBody: { reasoning_effort: low }
     - id: kimi-k3
       name: Kimi K3
       description: Moonshot AI
@@ -85,6 +91,8 @@ config:
       baseUrl: https://api.moonshot.ai/v1
       model: kimi-k3
       apiKey: ${MOONSHOT_API_KEY}
+      thinkingBudget: 40000
+      fastModeBody: { thinking: { type: disabled } }
     - id: deepseek-v4-pro
       name: DeepSeek V4 Pro
       description: DeepSeek flagship
@@ -92,6 +100,8 @@ config:
       baseUrl: https://api.deepseek.com
       model: deepseek-v4-pro
       apiKey: ${DEEPSEEK_API_KEY}
+      thinkingBudget: 40000
+      fastModeBody: { thinking: { type: disabled } }
     - id: deepseek-flash
       name: DeepSeek V4.1 Flash
       description: Fast DeepSeek
@@ -99,6 +109,8 @@ config:
       baseUrl: https://api.deepseek.com
       model: deepseek-flash
       apiKey: ${DEEPSEEK_API_KEY}
+      thinkingBudget: 40000
+      fastModeBody: { thinking: { type: disabled } }
 
 ingress:
   enabled: true

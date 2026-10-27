@@ -21,6 +21,7 @@ const state = {
   selectedColor: load('color', 'random'),
   watchWhite: load('watchWhite', null),
   watchBlack: load('watchBlack', null),
+  fast: { selectedLlm: false, watchWhite: false, watchBlack: false, ...load('fast', {}) }, // Fast mode per lobby pick
   game: null,
   orientation: 'w',
   selected: null, // square currently selected by the player
@@ -254,6 +255,11 @@ function renderLobby() {
     $('#llm-list').innerHTML = llmCards(state.selectedLlm);
     document.querySelectorAll('.color-btn').forEach((b) => b.classList.toggle('selected', b.dataset.color === state.selectedColor));
   }
+  for (const toggle of document.querySelectorAll('.fast-toggle')) {
+    const key = toggle.dataset.for;
+    toggle.hidden = !state.llms.find((l) => l.id === state[key])?.fastMode;
+    toggle.querySelector('input').checked = state.fast[key];
+  }
   $('#play-btn').textContent = watch ? 'Watch' : 'Play';
   $('#play-btn').disabled = watch ? !(state.watchWhite && state.watchBlack) : !state.selectedLlm;
 }
@@ -291,10 +297,19 @@ $('#llm-list').addEventListener('dblclick', (e) => {
 
 $('#swap-btn').addEventListener('click', () => {
   [state.watchWhite, state.watchBlack] = [state.watchBlack, state.watchWhite];
+  [state.fast.watchWhite, state.fast.watchBlack] = [state.fast.watchBlack, state.fast.watchWhite];
   save('watchWhite', state.watchWhite);
   save('watchBlack', state.watchBlack);
+  save('fast', state.fast);
   renderLobby();
 });
+
+document.querySelectorAll('.fast-toggle input').forEach((input) =>
+  input.addEventListener('change', () => {
+    state.fast[input.closest('.fast-toggle').dataset.for] = input.checked;
+    save('fast', state.fast);
+  }),
+);
 
 document.querySelectorAll('.color-btn').forEach((btn) =>
   btn.addEventListener('click', () => {
@@ -307,8 +322,10 @@ document.querySelectorAll('.color-btn').forEach((btn) =>
 $('#play-btn').addEventListener('click', startFromLobby);
 
 function startFromLobby() {
-  if (state.mode === 'watch') startGame({ mode: 'watch', whiteLlmId: state.watchWhite, blackLlmId: state.watchBlack });
-  else startGame({ mode: 'human', llmId: state.selectedLlm, color: state.selectedColor });
+  // "<id>:fast" asks the server for the model in Fast mode
+  const pick = (key) => (state.fast[key] && state.llms.find((l) => l.id === state[key])?.fastMode ? `${state[key]}:fast` : state[key]);
+  if (state.mode === 'watch') startGame({ mode: 'watch', whiteLlmId: pick('watchWhite'), blackLlmId: pick('watchBlack') });
+  else startGame({ mode: 'human', llmId: pick('selectedLlm'), color: state.selectedColor });
 }
 
 async function startGame(params) {

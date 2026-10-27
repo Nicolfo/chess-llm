@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { Chess } from 'chess.js';
 import { propagateAttributes, startActiveObservation, startObservation } from '@langfuse/tracing';
+import { resolveLlm } from './config.js';
 import { chat } from './llm.js';
 
 const COLOR_NAME = { w: 'White', b: 'Black' };
@@ -335,7 +336,7 @@ export class Game {
   /** Rebuild a saved game. Players are looked up in the current config by id. */
   static restore(data, { llms, maxAttempts, requestTimeoutMs }) {
     // A model removed from the config keeps its name on screen but can't move any more.
-    const player = (saved) => saved && (llms.find((l) => l.id === saved.id) ?? { ...saved, missing: true });
+    const player = (saved) => saved && (resolveLlm(llms, saved.id) ?? { ...saved, missing: true });
     const game = new Game({ white: player(data.players.w), black: player(data.players.b), maxAttempts, requestTimeoutMs, id: data.id });
     game.chess.loadPgn(data.pgn);
     game.createdAt = data.createdAt;

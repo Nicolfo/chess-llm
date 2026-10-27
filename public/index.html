@@ -27,11 +27,13 @@
           <div>
             <div class="side-label"><svg viewBox="0 0 40 40"><use href="pieces.svg#wk"/></svg> White</div>
             <div id="white-list" class="llm-list compact"></div>
+            <label class="fast-toggle" data-for="watchWhite" title="Thinking turned off, or as low as the model allows: much faster moves, but weaker play" hidden><input type="checkbox"> ⚡ Fast mode <span class="muted">(little or no thinking)</span></label>
           </div>
           <button type="button" id="swap-btn" class="btn btn-ghost swap-btn" title="Swap sides">⇄</button>
           <div>
             <div class="side-label"><svg viewBox="0 0 40 40"><use href="pieces.svg#bk"/></svg> Black</div>
             <div id="black-list" class="llm-list compact"></div>
+            <label class="fast-toggle" data-for="watchBlack" title="Thinking turned off, or as low as the model allows: much faster moves, but weaker play" hidden><input type="checkbox"> ⚡ Fast mode <span class="muted">(little or no thinking)</span></label>
           </div>
         </div>
       </div>
@@ -39,6 +41,7 @@
       <div id="human-setup">
       <p class="muted">Choose your opponent</p>
       <div id="llm-list" class="llm-list"></div>
+      <label class="fast-toggle" data-for="selectedLlm" title="Thinking turned off, or as low as the model allows: much faster moves, but weaker play" hidden><input type="checkbox"> ⚡ Fast mode <span class="muted">(little or no thinking)</span></label>
 
       <p class="muted">I play as</p>
       <div class="color-picker" role="radiogroup" aria-label="Side">

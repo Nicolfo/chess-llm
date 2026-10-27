@@ -9,6 +9,7 @@ A chess.com-style web app where you play chess against large language models, or
 - **Play vs LLM**: pick an opponent and a side (white / black / random). Each move comes with a short reason from the model, hidden by default; toggle it with the 💬 Reasons button.
 - **LLM vs LLM**: pick a model for each side (the same model may play both) and watch. Reasons are always shown. Pause / resume at any time (a paused game stays paused when you reopen it); while paused, ⏭ Step (or the → key) plays one move at a time.
 - **Engine analysis** (📈 Engine): a Stockfish eval bar, the engine's best line, and every move labelled Best / Excellent / Good / Inaccuracy / Mistake / Blunder with an accuracy score per side, like chess.com's game review. Live in LLM vs LLM; against an LLM it appears once the game is over. Stockfish runs in your browser, so it costs nothing and needs no setup.
+- **Fast mode** (⚡ checkbox under each model pick): the model thinks little or not at all, so moves take seconds instead of minutes, at the cost of weaker play. Thinking is turned off where the provider allows it (DeepSeek, Kimi, Gemini 4 Argon), otherwise set to the lowest effort (Claude, GPT, Gemini 3.8 Flash).
 
 <p align="center">
   <img src="docs/llm-vs-llm.png" alt="LLM vs LLM setup: Claude Opus 5.5 selected for White, Gemini 3.8 Flash for Black" width="480">
@@ -183,7 +184,18 @@ Games are saved in the `data/` folder (one JSON file per game), so they survive 
       "provider": "anthropic",
       "baseUrl": "https://api.anthropic.com",
       "apiKey": "${ANTHROPIC_API_KEY}",
-      "model": "claude-opus-5-5"
+      "model": "claude-opus-5-5",
+      "fastModeBody": { "output_config": { "effort": "low" } }
+    },
+    {
+      "id": "deepseek-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "provider": "openai",
+      "baseUrl": "https://api.deepseek.com",
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "model": "deepseek-flash",
+      "thinkingBudget": 40000,
+      "fastModeBody": { "thinking": { "type": "disabled" } }
     },
     {
       "id": "llama-local",
@@ -221,6 +233,8 @@ Per-model settings:
 | `headers` | extra HTTP headers |
 | `extraBody` | merged into the request body, for provider options such as `{ "reasoning_effort": "low" }` |
 | `timeoutMs` | per-model override of `requestTimeoutMs` |
+| `fastModeBody` | merged into the request in Fast mode: thinking off, or as low as the model allows. DeepSeek / Kimi: `{ "thinking": { "type": "disabled" } }`; Claude: `{ "output_config": { "effort": "low" } }`; OpenAI / Gemini: `{ "reasoning_effort": "low" }` (`"none"` where supported). Fast mode is offered in the lobby only for models that have it |
+| `thinkingBudget` | `openai` provider only: when the model has thought for this many tokens without answering, stop it and ask for the move again in Fast mode, handing over its analysis so far. A safety net against runaway thinking (DeepSeek can think for 5+ minutes on a hard position); set it high, e.g. `40000`, so normal moves are unaffected. Cut-off moves show as warnings in Langfuse |
 | `icon` | avatar: `claude`, `openai`, `gemini`, `kimi`, `deepseek` (files in `public/icons`), an image URL, or `""` for a letter. Guessed from the model, name and URL when omitted |
 
 API keys and base URLs never leave the server; the browser only sees each model's id, name, provider and model.
@@ -339,7 +353,7 @@ REST API:
 | method | path | body |
 |---|---|---|
 | GET | `/api/llms` | |
-| POST | `/api/games` | `{mode: "human", llmId, color: "white"\|"black"\|"random"}` or `{mode: "watch", whiteLlmId, blackLlmId}` |
+| POST | `/api/games` | `{mode: "human", llmId, color: "white"\|"black"\|"random"}` or `{mode: "watch", whiteLlmId, blackLlmId}`. An id ending in `:fast` picks that model in Fast mode |
 | GET | `/api/games/:id` | |
 | POST | `/api/games/:id/move` | `{from, to, promotion?}` |
 | POST | `/api/games/:id/llm-move` | |

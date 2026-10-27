@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { authMiddleware } from './auth.js';
-import { loadConfig } from './config.js';
+import { hasFastMode, loadConfig, resolveLlm } from './config.js';
 import { Game, GameError } from './game.js';
 import { LlmError } from './llm.js';
 import { GameStore } from './store.js';
@@ -45,11 +45,17 @@ app.get('/vendor/chess.js', (req, res) => {
 
 // API keys and base URLs never leave the server.
 app.get('/api/llms', (req, res) => {
-  res.json(config.llms.map(({ id, name, provider, model, description, icon }) => ({ id, name, provider, model, description, icon })));
+  res.json(
+    config.llms.map((llm) => {
+      const { id, name, provider, model, description, icon } = llm;
+      return { id, name, provider, model, description, icon, fastMode: hasFastMode(llm) };
+    }),
+  );
 });
 
 // { mode: 'human', llmId, color: 'white' | 'black' | 'random' }  play against an LLM
 // { mode: 'watch', whiteLlmId, blackLlmId }                       watch two LLMs play each other
+// An LLM id ending in ":fast" is that LLM in Fast mode (little or no thinking).
 app.post('/api/games', (req, res) => {
   const { mode = 'human', llmId, color = 'random', whiteLlmId, blackLlmId } = req.body ?? {};
   let white;
@@ -137,7 +143,7 @@ function parseTrustProxy(value) {
 }
 
 function findLlm(id) {
-  const llm = config.llms.find((l) => l.id === id);
+  const llm = resolveLlm(config.llms, id);
   if (!llm) throw new GameError(`Unknown LLM "${id}"`, 404);
   return llm;
 }

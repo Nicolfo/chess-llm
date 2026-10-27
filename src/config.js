@@ -36,6 +36,7 @@ export function loadConfig() {
       throw new Error(`[config] llms[${i}] (${id}): provider must be one of ${[...PROVIDERS].join(', ')}`);
     }
     if (!llm.model) throw new Error(`[config] llms[${i}] (${id}): "model" is required`);
+    if (id.endsWith(FAST_SUFFIX)) throw new Error(`[config] llms[${i}] (${id}): ids must not end with "${FAST_SUFFIX}"`);
     return {
       id,
       name: llm.name ?? llm.model,
@@ -48,6 +49,12 @@ export function loadConfig() {
       showLegalMoves: llm.showLegalMoves ?? raw.showLegalMoves ?? false,
       headers: llm.headers ?? {},
       extraBody: llm.extraBody ?? {}, // merged into the request body, e.g. { "reasoning_effort": "low" }
+      // Merged into the request in Fast mode: thinking off, or as low as the model allows,
+      // e.g. { "thinking": { "type": "disabled" } }. Fast mode is offered only when it is set.
+      fastModeBody: llm.fastModeBody ?? {},
+      // OpenAI-style providers only: stop thinking after this many tokens and ask for the move
+      // again in Fast mode
+      thinkingBudget: llm.provider === 'openai' ? llm.thinkingBudget : undefined,
       timeoutMs: llm.timeoutMs, // overrides requestTimeoutMs for this model
       description: llm.description ?? '',
       icon: llm.icon ?? guessIcon(llm),
@@ -66,6 +73,25 @@ export function loadConfig() {
     maxAttempts: raw.maxAttempts ?? 5,
     requestTimeoutMs: raw.requestTimeoutMs ?? 600_000,
     llms,
+  };
+}
+
+const FAST_SUFFIX = ':fast';
+
+export const hasFastMode = (llm) => Object.keys(llm.fastModeBody).length > 0;
+
+/** The configured LLM with this id; "<id>:fast" is that LLM in Fast mode. */
+export function resolveLlm(llms, id) {
+  const fast = typeof id === 'string' && id.endsWith(FAST_SUFFIX);
+  const llm = llms.find((l) => l.id === (fast ? id.slice(0, -FAST_SUFFIX.length) : id));
+  if (!llm || !fast) return llm;
+  if (!hasFastMode(llm)) return undefined;
+  return {
+    ...llm,
+    id,
+    name: `${llm.name} (fast)`,
+    extraBody: { ...llm.extraBody, ...llm.fastModeBody },
+    thinkingBudget: undefined,
   };
 }
 

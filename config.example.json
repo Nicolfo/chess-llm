@@ -11,7 +11,8 @@
       "provider": "anthropic",
       "baseUrl": "https://api.anthropic.com",
       "model": "claude-opus-5-5",
-      "apiKey": "${ANTHROPIC_API_KEY}"
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "fastModeBody": { "output_config": { "effort": "low" } }
     },
     {
       "id": "fable-5.1",
@@ -20,7 +21,8 @@
       "provider": "anthropic",
       "baseUrl": "https://api.anthropic.com",
       "model": "claude-fable-5-1",
-      "apiKey": "${ANTHROPIC_API_KEY}"
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "fastModeBody": { "output_config": { "effort": "low" } }
     },
     {
       "id": "gpt-6-astra",
@@ -29,7 +31,8 @@
       "provider": "openai",
       "baseUrl": "https://api.openai.com/v1",
       "model": "gpt-6-astra",
-      "apiKey": "${OPENAI_API_KEY}"
+      "apiKey": "${OPENAI_API_KEY}",
+      "fastModeBody": { "reasoning_effort": "low" }
     },
     {
       "id": "gpt-6.1-sol",
@@ -38,7 +41,8 @@
       "provider": "openai",
       "baseUrl": "https://api.openai.com/v1",
       "model": "gpt-6.1-sol",
-      "apiKey": "${OPENAI_API_KEY}"
+      "apiKey": "${OPENAI_API_KEY}",
+      "fastModeBody": { "reasoning_effort": "low" }
     },
     {
       "id": "gemini-4-argon",
@@ -47,7 +51,8 @@
       "provider": "openai",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
       "model": "gemini-4-argon",
-      "apiKey": "${GEMINI_API_KEY}"
+      "apiKey": "${GEMINI_API_KEY}",
+      "fastModeBody": { "reasoning_effort": "none" }
     },
     {
       "id": "gemini-3.8-flash",
@@ -56,7 +61,8 @@
       "provider": "openai",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
       "model": "gemini-3.8-flash",
-      "apiKey": "${GEMINI_API_KEY}"
+      "apiKey": "${GEMINI_API_KEY}",
+      "fastModeBody": { "reasoning_effort": "low" }
     },
     {
       "id": "kimi-k3",
@@ -65,7 +71,9 @@
       "provider": "openai",
       "baseUrl": "https://api.moonshot.ai/v1",
       "model": "kimi-k3",
-      "apiKey": "${MOONSHOT_API_KEY}"
+      "apiKey": "${MOONSHOT_API_KEY}",
+      "thinkingBudget": 40000,
+      "fastModeBody": { "thinking": { "type": "disabled" } }
     },
     {
       "id": "deepseek-v4-pro",
@@ -74,7 +82,9 @@
       "provider": "openai",
       "baseUrl": "https://api.deepseek.com",
       "model": "deepseek-v4-pro",
-      "apiKey": "${DEEPSEEK_API_KEY}"
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "thinkingBudget": 40000,
+      "fastModeBody": { "thinking": { "type": "disabled" } }
     },
     {
       "id": "deepseek-flash",
@@ -83,7 +93,9 @@
       "provider": "openai",
       "baseUrl": "https://api.deepseek.com",
       "model": "deepseek-flash",
-      "apiKey": "${DEEPSEEK_API_KEY}"
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "thinkingBudget": 40000,
+      "fastModeBody": { "thinking": { "type": "disabled" } }
     }
   ]
 }
