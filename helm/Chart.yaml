@@ -2,8 +2,8 @@ apiVersion: v2
 name: chess-llm
 description: Play chess against LLMs, or watch two LLMs play each other
 type: application
-version: 0.3.3
-appVersion: "1.3.3"
+version: 0.4.0
+appVersion: "1.4.0"
 home: https://github.com/Nicolfo/chess-llm
 sources:
   - https://github.com/Nicolfo/chess-llm
