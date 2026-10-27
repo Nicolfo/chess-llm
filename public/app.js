@@ -18,12 +18,15 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 const state = {
   llms: [],
-  mode: load('mode', 'human'), // lobby tab: 'human' | 'watch'
+  mode: load('mode', 'human'), // lobby tab: 'human' | 'watch' | 'engine'
   selectedLlm: load('llm', null),
   selectedColor: load('color', 'random'),
   watchWhite: load('watchWhite', null),
   watchBlack: load('watchBlack', null),
-  fast: { selectedLlm: false, watchWhite: false, watchBlack: false, ...load('fast', {}) }, // Fast mode per lobby pick
+  engineLlm: load('engineLlm', null), // LLM vs Engine: the LLM, the engine and the LLM's side
+  engineBot: load('engineBot', null),
+  engineColor: load('engineColor', 'random'),
+  fast: { selectedLlm: false, watchWhite: false, watchBlack: false, engineLlm: false, ...load('fast', {}) }, // Fast mode per lobby pick
   game: null,
   orientation: 'w',
   selected: null, // square currently selected by the player
@@ -188,7 +191,8 @@ function resetGameState(game) {
   state.llmBusy = null;
   state.selected = null;
   state.paused = !!game.paused;
-  state.orientation = game.playerColor ?? 'w';
+  // your side, or in LLM vs Engine the LLM's side
+  state.orientation = game.playerColor ?? (game.players.w?.provider === 'engine' ? 'b' : 'w');
   state.animatedKey = null;
   state.resultShownFor = null;
   state.logOpen.clear();
@@ -217,20 +221,32 @@ async function showLobby() {
       showLobbyError(`Could not load LLM list: ${err.message}`);
     }
   }
-  const valid = (id) => state.llms.some((l) => l.id === id);
-  const first = state.llms[0]?.id ?? null;
-  if (!valid(state.selectedLlm)) state.selectedLlm = first;
-  if (!valid(state.watchWhite)) state.watchWhite = first;
-  if (!valid(state.watchBlack)) state.watchBlack = state.llms[1]?.id ?? first;
+  const llms = llmEntries();
+  const engines = engineEntries();
+  const valid = (id, list) => list.some((l) => l.id === id);
+  if (!valid(state.selectedLlm, state.llms)) state.selectedLlm = llms[0]?.id ?? state.llms[0]?.id ?? null;
+  if (!valid(state.watchWhite, llms)) state.watchWhite = llms[0]?.id ?? null;
+  if (!valid(state.watchBlack, llms)) state.watchBlack = llms[1]?.id ?? llms[0]?.id ?? null;
+  if (!valid(state.engineLlm, llms)) state.engineLlm = llms[0]?.id ?? null;
+  if (!valid(state.engineBot, engines)) state.engineBot = engines[0]?.id ?? null;
+  if (state.mode === 'engine' && !engines.length) state.mode = 'human';
   renderLobby();
 }
+
+// Stockfish entries get their own lobby tab; LLM vs LLM lists only the models.
+const isEngineEntry = (l) => l.provider === 'engine';
+const llmEntries = () => state.llms.filter((l) => !isEngineEntry(l));
+const engineEntries = () => state.llms.filter(isEngineEntry);
+
+/** The state key a side picker writes to: its data-key. */
+const pickerKey = (btn) => /** @type {HTMLElement} */ (btn.closest('.color-picker')).dataset.key;
 
 // Card tag: the model's vendor (several vendors are reached through the OpenAI-compatible API).
 const VENDOR = { claude: 'Anthropic', openai: 'OpenAI', gemini: 'Google', kimi: 'Moonshot', deepseek: 'DeepSeek', stockfish: 'Engine' };
 
-function llmCards(selectedId) {
-  if (!state.llms.length) return '<p class="muted">No LLMs configured. Add some to <code>config.json</code>.</p>';
-  return state.llms
+function llmCards(list, selectedId) {
+  if (!list.length) return '<p class="muted">None configured. Add some to <code>config.json</code>.</p>';
+  return list
     .map(
       (l) => `
       <button type="button" class="llm-card ${l.id === selectedId ? 'selected' : ''}" data-id="${esc(l.id)}">
@@ -246,24 +262,31 @@ function llmCards(selectedId) {
 }
 
 function renderLobby() {
-  const watch = state.mode === 'watch';
-  $$('.mode-tab').forEach((t) => t.classList.toggle('selected', t.dataset.mode === state.mode));
-  $('#human-setup').hidden = watch;
-  $('#watch-setup').hidden = !watch;
-  if (watch) {
-    $('#white-list').innerHTML = llmCards(state.watchWhite);
-    $('#black-list').innerHTML = llmCards(state.watchBlack);
+  const { mode } = state;
+  $$('.mode-tab').forEach((t) => t.classList.toggle('selected', t.dataset.mode === mode));
+  $('.mode-tab[data-mode="engine"]').hidden = !engineEntries().length;
+  $('#human-setup').hidden = mode !== 'human';
+  $('#watch-setup').hidden = mode !== 'watch';
+  $('#engine-setup').hidden = mode !== 'engine';
+  if (mode === 'watch') {
+    $('#white-list').innerHTML = llmCards(llmEntries(), state.watchWhite);
+    $('#black-list').innerHTML = llmCards(llmEntries(), state.watchBlack);
+  } else if (mode === 'engine') {
+    $('#engine-llm-list').innerHTML = llmCards(llmEntries(), state.engineLlm);
+    $('#engine-list').innerHTML = llmCards(engineEntries(), state.engineBot);
   } else {
-    $('#llm-list').innerHTML = llmCards(state.selectedLlm);
-    $$('.color-btn').forEach((b) => b.classList.toggle('selected', b.dataset.color === state.selectedColor));
+    $('#llm-list').innerHTML = llmCards(state.llms, state.selectedLlm);
   }
+  // each side picker stores its choice in the state key named by its data-key
+  $$('.color-btn').forEach((b) => b.classList.toggle('selected', b.dataset.color === state[pickerKey(b)]));
   for (const toggle of $$('.fast-toggle')) {
     const key = toggle.dataset.for;
     toggle.hidden = !state.llms.find((l) => l.id === state[key])?.fastMode;
     toggle.querySelector('input').checked = state.fast[key];
   }
-  $('#play-btn').textContent = watch ? 'Watch' : 'Play';
-  $('#play-btn').disabled = watch ? !(state.watchWhite && state.watchBlack) : !state.selectedLlm;
+  $('#play-btn').textContent = mode === 'human' ? 'Play' : 'Watch';
+  $('#play-btn').disabled =
+    mode === 'watch' ? !(state.watchWhite && state.watchBlack) : mode === 'engine' ? !(state.engineLlm && state.engineBot) : !state.selectedLlm;
 }
 
 function showLobbyError(msg) {
@@ -292,6 +315,8 @@ function onCardClick(list, key) {
 onCardClick('#llm-list', 'selectedLlm');
 onCardClick('#white-list', 'watchWhite');
 onCardClick('#black-list', 'watchBlack');
+onCardClick('#engine-llm-list', 'engineLlm');
+onCardClick('#engine-list', 'engineBot');
 
 $('#llm-list').addEventListener('dblclick', (e) => {
   if (e.target.closest('.llm-card')) startFromLobby();
@@ -315,8 +340,9 @@ $('#swap-btn').addEventListener('click', () => {
 
 $$('.color-btn').forEach((btn) =>
   btn.addEventListener('click', () => {
-    state.selectedColor = btn.dataset.color;
-    save('color', state.selectedColor);
+    const key = pickerKey(btn);
+    state[key] = btn.dataset.color;
+    save(key === 'selectedColor' ? 'color' : key, state[key]);
     renderLobby();
   }),
 );
@@ -327,7 +353,12 @@ function startFromLobby() {
   // "<id>:fast" asks the server for the model in Fast mode
   const pick = (key) => (state.fast[key] && state.llms.find((l) => l.id === state[key])?.fastMode ? `${state[key]}:fast` : state[key]);
   if (state.mode === 'watch') startGame({ mode: 'watch', whiteLlmId: pick('watchWhite'), blackLlmId: pick('watchBlack') });
-  else startGame({ mode: 'human', llmId: pick('selectedLlm'), color: state.selectedColor });
+  else if (state.mode === 'engine') {
+    // an LLM vs engine game is an ordinary watch game with the engine on one side
+    const llmWhite = state.engineColor === 'random' ? Math.random() < 0.5 : state.engineColor === 'white';
+    const [white, black] = llmWhite ? [pick('engineLlm'), state.engineBot] : [state.engineBot, pick('engineLlm')];
+    startGame({ mode: 'watch', whiteLlmId: white, blackLlmId: black });
+  } else startGame({ mode: 'human', llmId: pick('selectedLlm'), color: state.selectedColor });
 }
 
 async function startGame(params) {

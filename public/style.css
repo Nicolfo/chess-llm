@@ -553,6 +553,7 @@ body {
 }
 .side-label svg { width: 26px; height: 26px; }
 .swap-btn { align-self: center; font-size: 20px; padding: 8px 10px; }
+.vs-label { align-self: center; padding: 0 6px; color: var(--text-muted); font-weight: 700; }
 .fast-toggle {
   display: flex;
   align-items: center;
@@ -571,7 +572,7 @@ body {
 
 @media (max-width: 560px) {
   .watch-grid { grid-template-columns: 1fr; }
-  .swap-btn { justify-self: center; }
+  .swap-btn, .vs-label { justify-self: center; }
 }
 
 .btn.active { color: var(--green); }

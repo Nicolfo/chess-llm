@@ -19,6 +19,36 @@
       <div class="mode-tabs" role="tablist">
         <button type="button" class="mode-tab" data-mode="human" role="tab">♟ Play vs LLM</button>
         <button type="button" class="mode-tab" data-mode="watch" role="tab">👁 LLM vs LLM</button>
+        <button type="button" class="mode-tab" data-mode="engine" role="tab">🤖 LLM vs Engine</button>
+      </div>
+
+      <div id="engine-setup" hidden>
+        <p class="muted">Watch a model play Stockfish at a strength you choose. The model's reasoning is shown for every move.</p>
+        <div class="watch-grid">
+          <div>
+            <div class="side-label">LLM</div>
+            <div id="engine-llm-list" class="llm-list compact"></div>
+            <label class="fast-toggle" data-for="engineLlm" title="Thinking turned off, or as low as the model allows: much faster moves, but weaker play" hidden><input type="checkbox"> ⚡ Fast mode <span class="muted">(little or no thinking)</span></label>
+          </div>
+          <div class="vs-label">vs</div>
+          <div>
+            <div class="side-label">Engine</div>
+            <div id="engine-list" class="llm-list compact"></div>
+          </div>
+        </div>
+
+        <p class="muted">The LLM plays as</p>
+      <div class="color-picker" role="radiogroup" aria-label="Side" data-key="engineColor">
+        <button type="button" class="color-btn" data-color="white" title="White">
+          <svg viewBox="0 0 40 40"><use href="pieces.svg#wk"/></svg><span>White</span>
+        </button>
+        <button type="button" class="color-btn" data-color="random" title="Random">
+          <span class="random-icon"><svg viewBox="0 0 40 40"><use href="pieces.svg#wk"/></svg><svg viewBox="0 0 40 40"><use href="pieces.svg#bk"/></svg></span><span>Random</span>
+        </button>
+        <button type="button" class="color-btn" data-color="black" title="Black">
+          <svg viewBox="0 0 40 40"><use href="pieces.svg#bk"/></svg><span>Black</span>
+        </button>
+      </div>
       </div>
 
       <div id="watch-setup" hidden>
@@ -44,7 +74,7 @@
       <label class="fast-toggle" data-for="selectedLlm" title="Thinking turned off, or as low as the model allows: much faster moves, but weaker play" hidden><input type="checkbox"> ⚡ Fast mode <span class="muted">(little or no thinking)</span></label>
 
       <p class="muted">I play as</p>
-      <div class="color-picker" role="radiogroup" aria-label="Side">
+      <div class="color-picker" role="radiogroup" aria-label="Side" data-key="selectedColor">
         <button type="button" class="color-btn" data-color="white" title="White">
           <svg viewBox="0 0 40 40"><use href="pieces.svg#wk"/></svg><span>White</span>
         </button>
